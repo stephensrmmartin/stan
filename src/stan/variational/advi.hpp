@@ -2,6 +2,7 @@
 #define STAN_VARIATIONAL_ADVI_HPP
 
 #include <stan/math.hpp>
+#include <stan/analyze/mcmc/compute_effective_sample_size.hpp>
 #include <stan/callbacks/logger.hpp>
 #include <stan/callbacks/writer.hpp>
 #include <stan/callbacks/stream_writer.hpp>
@@ -520,6 +521,104 @@ class advi {
     }
     logger.info("COMPLETED.");
     return stan::services::error_codes::OK;
+  }
+
+  double lr(Q variational){ const
+    std::vector<double> values;
+    double log_p = 0;
+    double log_g = 0;
+    // Draw posterior sample. log_g is the log normal densities.
+    for (int n = 0; n < n_posterior_samples_; ++n) {
+      variational.sample_log_g(rng_, cont_params_, log_g);
+      //  log_p: Log probability in the unconstrained space
+      log_p = model_.template log_prob<false, true>(cont_params_, &msg2);
+      return log_p - log_g;
+    }
+  }
+
+  double gpdfit(x, wip = TRUE, min_grid_pts = 30, sort_x = TRUE){ //See section 4 of Zhang and Stephens (2009) #TODO translate r to c
+      if (sort_x) {
+        x <- sort.int(x)
+      }
+      N <- length(x)
+      prior <- 3
+      M <- min_grid_pts + floor(sqrt(N))
+      jj <- seq_len(M)
+      xstar <- x[floor(N / 4 + 0.5)] # first quartile of sample
+      theta <- 1 / x[N] + (1 - sqrt(M / (jj - 0.5))) / prior / xstar
+      l_theta <- N * lx(theta, x) # profile log-lik
+      w_theta <- 1 / vapply(jj, FUN.VALUE = numeric(1), FUN = function(j) {
+        sum(exp(l_theta - l_theta[j]))
+      })
+      theta_hat <- sum(theta * w_theta)
+      k <- mean.default(log1p(-theta_hat * x))
+      sigma <- -k / theta_hat
+
+      if (wip) {
+        k <- adjust_k_wip(k, n = N)
+      }
+
+      if (is.nan(k)) {
+        k <- Inf
+      }
+      return k
+    }
+
+  double stochastic_gradient_ascent_rb(Q& variational, double eta,
+                                        double tol_rel_obj, int max_iterations,
+                                        callbacks::logger& logger,
+                                        callbacks::writer& diagnostic_writer) const {
+    static const char* function
+            = "stan::variational::advi::stochastic_gradient_ascent_rb";
+
+  }
+
+  double run_rb(const Q& variational, double rhat_cut, double mcse_cut, double ess_cut, double chains, double Tmax callbacks::logger& logger){
+    const {
+      static const char* function = "stan::variational::advi::run_RVI";
+      double lr;
+      double window;
+      double khat;
+      double cont_params_ = variational.mean();
+      lr = lr(variational);
+
+      int dim = variational.dimension();
+      Eigen::VectorXd zeta(dim);
+      for (int i=0; i< Tmax; i++){
+        for (int c=0; c < chains; c++){
+          Q history_params[c] = Q(model_.num_params_r());
+          double param = stochastic_gradient_ascent_rb(variational, eta, tol_rel_obj, max_iterations,
+                                                         logger, diagnostic_writer);
+          history_params.insert(history_params.begin(), param);
+        }
+        if (t % W == 0)
+          bool rhat_cvg;
+          for(int k; k < dim; k++) {
+            if (rhat(history_params[k]) > rhat_cut) {
+              rhat_cvg = FALSE
+            }
+          }
+          if (rhat_cvg){
+            int T0 = t;
+            break;
+          }
+      }
+      khat = gpdfit(log(1 + history_params^2) / 2 + lr);
+
+      if (rhat_cvg or khat > 1.0){
+          logger.info(
+                  "Optimization may not have converged"
+          );
+        return mean(history_params[T0:t])
+      }
+      for (int i = T0; i < Tmax; i++){
+        double param = stochastic_gradient_ascent_rb(variational, eta, tol_rel_obj, max_iterations,
+                                                     logger, diagnostic_writer);
+        history_params.insert(history_params.begin(), param);
+        if ((t - T0) % W == 0) & (MCSE < mcse_cut) & (ESS > ess_cut){
+          return mean(history_params[T0:t])
+      }
+    }
   }
 
   // TODO(akucukelbir): move these things to stan math and test there
