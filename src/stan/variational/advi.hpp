@@ -21,7 +21,8 @@
 #include <queue>
 #include <string>
 #include <vector>
-#include <cmath>  // Is it OK to use math standard lib?
+#include <cmath>
+#include <limits>
 namespace stan {
 
 namespace variational {
@@ -530,11 +531,12 @@ class advi {
   * @param[in, out] weight_vector An Eigen
   * dynamic vector of weights, sorted in descending order
   */
-  void lr(const Q& variational_obj, const Eigen::VectorXd& weight_vector) 
-            const {
+  void lr(const Q& variational_obj, Eigen::VectorXd& weight_vector) 
+          const {
     // Need to check the vector is empty
     weight_vector.resize(n_posterior_samples_);
     double log_p, log_g;
+    std::stringstream msg2;
     // Draw posterior sample. log_g is the log normal densities.
     for (int n = 0; n < n_posterior_samples_; ++n) {
       variational_obj.sample_log_g(rng_, cont_params_, log_g);
@@ -548,59 +550,82 @@ class advi {
 
   /**
   * RVI Diagnostics: Approximate parameters k and sigma for pareto-k diagnostics
-  * from a given sample
+  * from a given sample vector x
   * Zhang, Stephens (2009)
+  * 
   * @param[in] x Vector of values in which pareto parameters will be estimated
-  * @param[in] wip boolean indicating a weakly informed prior 
+  * @param[in, out] k_ret Variable to return the estimated k value.
+  * @param[in, out] sigma Variable to return the estimated sigma value.
+  * @param[in] wip Boolean indicating whether to use a weakly informed prior
+  * @param[in] min_grid_pts The minimum number of grid points used in the fitting 
+  * algorithm. The actual number used is `min_grid_pts + floor(sqrt(length(x)))`
+  * @param[in] sort_x If `true` (the default), the first step in the fitting
+  * algorithm is to sort the elements of `x`. If `x` is already sorted in
+  * ascending order then `sort_x` can be set to `false` to skip the initial
+  * sorting step.
+
   */
-  double gpdfit(Eigen::VectorXd& x, const bool wip = true, 
-      const int min_grid_pts = 30, bool sort_x = true){
+  static void gpdfit(Eigen::VectorXd& x, double& k, double& sigma, 
+              const bool wip = true, const int min_grid_pts = 30, 
+              bool sort_x = true){
     //See section 4 of Zhang and Stephens (2009) #TODO translate r to c
-    using std::floor, std::sqrt, std::log;
 
-    // inverse Pareto CDF
-    void qgpd(const Eigen::VectorXd& p, const double k, 
-          const double sigma, Eigen::VectorXd& ret_cdf){
-      ret_cdf.resize(p.size());
-      ret_cdf << -p;
-      ret_cdf = ret_cdf.array().log1p().matrix() * -k;
-      ret_cdf = ret_cdf.unaryExpr<double(*)(double)>(&std::expm1) / k;
-    }
+    // R function definitions
+    auto lx = [&](const Eigen::VectorXd a, const Eigen::VectorXd x,
+            Eigen::VectorXd& ret_mat) mutable {
+      Eigen::VectorXd tmp_mat(x.size());
+      ret_mat.resize(a.size());
+      for(int i = 0; i < a.size(); i++){
+        tmp_mat = x * -a(i);
+        ret_mat(i) = tmp_mat.array().log1p().mean();
+        ret_mat(i) = std::log(-a(i) / ret_mat(i)) - ret_mat(i) - 1;
+      }
+      ret_mat = ret_mat.matrix();
+    };
 
-    double lx(const double a, const Eigen::VectorXd& x){
-      Eigen::VectorXd acc(x.size());
-      acc << x * -a;
-      acc = k.array().log1p().matrix();
-      return (-a) / acc - acc - 1;
-    }
+    auto adjust_k_wip = [&](double k_, double n_) mutable {
+      int a = 10, n_plus_a = n_ + a;
+      return k_ * n_ / n_plus_a + a * 0.5 / n_plus_a;
+    };
+    // end function definitions
 
     if (sort_x) {
       std::sort(x.data(), x.data() + x.size());
     }
-    const int N = x.size(), prior = 3;
-    const int M = min_grid_pts + floor(sqrt(N));
-    jj <- seq_len(M)
 
-    double xstar, theta
-    xstar = x((int)floor(N / 4 + 0.5) - 1);
-    theta = 1 / x(N-1) + (1 - sqrt(M / jj - 0.5)) / prior / xstar;
-    l_theta = N * lx()
-    //l_theta <- N * lx(theta, x) # profile log-lik
-    //w_theta <- 1 / vapply(jj, FUN.VALUE = numeric(1), FUN = function(j) {
-    //  sum(exp(l_theta - l_theta[j]))
-    //})
-    //theta_hat <- sum(theta * w_theta)
-    //k <- mean.default(log1p(-theta_hat * x))
-    //sigma <- -k / theta_hat
+    const int N = x.size(), prior = 3, M = min_grid_pts + 
+                                           std::floor(std::sqrt(N));
+    Eigen::VectorXd jj(M);
+    for(int i = 0; i < M; i++){
+      jj(i) = i + 1;  // seq_len(M) (cpp indexing)
+    }
 
-    //if (wip) {
-    //  k <- adjust_k_wip(k, n = N)
-    //}
+    Eigen::VectorXd theta(M);
+    double xstar = x((int)std::floor(N / 4 + 0.5));
 
-    //if (is.nan(k)) {
-    //  k <- Inf
-    //}
-    //return k
+    theta = 1 / x(N-1) + (1 - (M / (jj.array() - 0.5)).sqrt()) / prior / xstar;
+    theta = theta.matrix();
+
+    Eigen::VectorXd l_theta(theta.size());
+    lx(theta, x, l_theta);
+    l_theta *= N;
+    
+    Eigen::VectorXd w_theta = Eigen::VectorXd::Ones(l_theta.size());
+    for(int i = 0; i < w_theta.size(); i++){
+      w_theta(i) = 1 / (l_theta.array() - l_theta(jj(i) - 1)).exp().sum();
+      // subtract 1 from jj(i) to convert to cpp index
+    }
+    double theta_hat = (theta.array() * w_theta.array()).sum();
+    k = (-theta_hat * x.array()).log1p().mean();
+    sigma = -k / theta_hat;
+
+    if(wip){
+      k = adjust_k_wip(k, N);
+    }
+
+    if(std::isnan(k)){
+      k = std::numeric_limits<double>::infinity();
+    }
   }
 
   double stochastic_gradient_ascent_rb(Q& variational, double eta,
@@ -609,10 +634,10 @@ class advi {
                                         callbacks::writer& diagnostic_writer) const {
     static const char* function
             = "stan::variational::advi::stochastic_gradient_ascent_rb";
-
+    return 0.0; // temporary value
   }
 
-  double run_rb(const Q& variational, double rhat_cut, double mcse_cut, double ess_cut, double chains, double Tmax callbacks::logger& logger){
+  /*double run_rb(const Q& variational, double rhat_cut, double mcse_cut, double ess_cut, double chains, double Tmax, callbacks::logger& logger)
     const {
       static const char* function = "stan::variational::advi::run_RVI";
       double lr;
@@ -658,7 +683,7 @@ class advi {
           return mean(history_params[T0:t])
       }
     }
-  }
+  }*/
 
   // TODO(akucukelbir): move these things to stan math and test there
 
