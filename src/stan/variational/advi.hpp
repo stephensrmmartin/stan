@@ -639,7 +639,7 @@ class advi {
    */
   static double calculate_sample_ess(const Eigen::VectorXd& samples){
     std::vector<const double*> sample_ptr_arr = {samples.data()};
-    std::vector<size_t> size_arr = {samples.size()};
+    std::vector<size_t> size_arr = {(size_t)samples.size()};
     // hacky method, probably will only work with a single vector
     return stan::analyze::compute_effective_sample_size(sample_ptr_arr, 
                                                         size_arr);
@@ -657,7 +657,7 @@ class advi {
    */
   static double calculate_sample_rhat(const Eigen::VectorXd& samples){
     std::vector<const double*> sample_ptr_arr = {samples.data()};
-    std::vector<size_t> size_arr = {samples.size()};
+    std::vector<size_t> size_arr = {(size_t)samples.size()};
     return stan::analyze::compute_potential_scale_reduction(sample_ptr_arr,
                                                             size_arr);
   }
@@ -671,6 +671,13 @@ class advi {
    * of calling compute_effective_sample_size()
    * 
    * @return Calculated MCSE
+   * TODO
+   * 1. calculate lr (p(x)/q(x))
+   * 2. run psis(lr) to retrieve paret-smoothed weights(unnormalized)
+   * 3. do log(psis_weights) - log_sum_exp(psis_weighs) to normalize
+   * 4. run importance sampling with psis weights
+   * 5. calculate MCSE using self-normalized estimator eq in page 4 of "Pareto 
+   * Smoothed Importance Sampling"
    */
   static double calculate_sample_standard_error(const Eigen::VectorXd& samples, 
                           double ess=std::numeric_limits<double>::quiet_NaN()){
