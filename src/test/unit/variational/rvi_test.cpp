@@ -26,7 +26,6 @@ TEST(RVI_SUBMODULE_TEST, gpdfit){
     Eigen::VectorXd cont_params = Eigen::VectorXd::Zero(2);
     cont_params(0) = 0.75;
     cont_params(1) = 0.75;
-
     rng_t base_rng;
     base_rng.seed(3021828106u);
 
@@ -41,4 +40,6 @@ TEST(RVI_SUBMODULE_TEST, gpdfit){
     test_advi.gpdfit(x, advi_k, advi_sigma, false);
     EXPECT_FLOAT_EQ(loo_nowip_k, advi_k);
     EXPECT_FLOAT_EQ(loo_nowip_sigma, advi_sigma);
+
+    std::cout << test_advi.calculate_sample_standard_error(x) << std::endl;
 }

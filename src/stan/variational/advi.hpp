@@ -3,6 +3,7 @@
 
 #include <stan/math.hpp>
 #include <stan/analyze/mcmc/compute_effective_sample_size.hpp>
+#include <stan/analyze/mcmc/compute_potential_scale_reduction.hpp>
 #include <stan/callbacks/logger.hpp>
 #include <stan/callbacks/writer.hpp>
 #include <stan/callbacks/stream_writer.hpp>
@@ -626,6 +627,60 @@ class advi {
     if(std::isnan(k)){
       k = std::numeric_limits<double>::infinity();
     }
+  }
+
+  /**
+   * RVI Diagnostics
+   * A sample function to show how compute_effective_sample_size() in
+   * stan/analyze/mcmc/compute_effective_sample_size.hpp would be used.
+   * 
+   * @param[in] samples An Eigen::VectorXd containing individual samples
+   * @return Calculated ESS
+   */
+  static double calculate_sample_ess(const Eigen::VectorXd& samples){
+    std::vector<const double*> sample_ptr_arr = {samples.data()};
+    std::vector<size_t> size_arr = {samples.size()};
+    // hacky method, probably will only work with a single vector
+    return stan::analyze::compute_effective_sample_size(sample_ptr_arr, 
+                                                        size_arr);
+    
+  }
+
+  /**
+   * RVI Diagnostics
+   * A sample function to show how compute_potential_scale_reduction() in
+   * stan/analyze/mcmc/compute_potential_scale_reduction.hpp would be used to
+   * calculate Rhat values
+   * 
+   * @param[in] samples An Eigen::VectorXd containing individual samples
+   * @return Calculated Rhat
+   */
+  static double calculate_sample_rhat(const Eigen::VectorXd& samples){
+    std::vector<const double*> sample_ptr_arr = {samples.data()};
+    std::vector<size_t> size_arr = {samples.size()};
+    return stan::analyze::compute_potential_scale_reduction(sample_ptr_arr,
+                                                            size_arr);
+  }
+ 
+  /**
+   * RVI Diagnostics
+   * Estimate the Monte Carlo Standard Error of posterior samples where
+   * MCSE = sd(x) / sqrt(ess)
+   * @param[in] samples An Eigen::VectorXd containing posterior samples
+   * @param[in] ess If specified, will be used as effective sample size instead
+   * of calling compute_effective_sample_size()
+   * 
+   * @return Calculated MCSE
+   */
+  static double calculate_sample_standard_error(const Eigen::VectorXd& samples, 
+                          double ess=std::numeric_limits<double>::quiet_NaN()){
+    double mean = samples.array().mean();
+    double sigma = std::sqrt(((samples.array() - mean) / 
+                              std::sqrt(samples.size() - 1.0)).square().sum());
+    if(std::isnan(ess)){
+      ess = calculate_sample_ess(samples);
+    }
+    return sigma / std::sqrt(ess);
   }
 
   double stochastic_gradient_ascent_rb(Q& variational, double eta,
