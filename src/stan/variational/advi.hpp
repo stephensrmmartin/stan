@@ -2,6 +2,7 @@
 #define STAN_VARIATIONAL_ADVI_HPP
 
 #include <stan/math.hpp>
+#include <stan/analyze/mcmc/autocovariance.hpp>
 #include <stan/analyze/mcmc/compute_effective_sample_size.hpp>
 #include <stan/analyze/mcmc/compute_potential_scale_reduction.hpp>
 #include <stan/callbacks/logger.hpp>
@@ -637,14 +638,7 @@ class advi {
    * @param[in] samples An Eigen::VectorXd containing individual samples
    * @return Calculated ESS
    */
-  static double calculate_sample_ess(const Eigen::VectorXd& samples){
-    std::vector<const double*> sample_ptr_arr = {samples.data()};
-    std::vector<size_t> size_arr = {(size_t)samples.size()};
-    // hacky method, probably will only work with a single vector
-    return stan::analyze::compute_effective_sample_size(sample_ptr_arr, 
-                                                        size_arr);
-    
-  }
+
 
   /**
    * RVI Diagnostics
@@ -664,90 +658,173 @@ class advi {
  
   /**
    * RVI Diagnostics
-   * Estimate the Monte Carlo Standard Error of posterior samples where
-   * MCSE = sd(x) / sqrt(ess)
-   * @param[in] samples An Eigen::VectorXd containing posterior samples
+   * Estimate the Effective Sample Size and Monte Carlo Standard Error of posterior samples where
+   * MCSE = sqrt( var(parmas) / ess)
+   * @param[in] samples An Eigen::VectorXd containing posterior samples @TODO rewrite from here
    * @param[in] ess If specified, will be used as effective sample size instead
    * of calling compute_effective_sample_size()
    * 
    * @return Calculated MCSE
-   * TODO
-   * 1. calculate lr (p(x)/q(x))
-   * 2. run psis(lr) to retrieve paret-smoothed weights(unnormalized)
-   * 3. do log(psis_weights) - log_sum_exp(psis_weighs) to normalize
-   * 4. run importance sampling with psis weights
-   * 5. calculate MCSE using self-normalized estimator eq in page 4 of "Pareto 
-   * Smoothed Importance Sampling"
    */
-  static double calculate_sample_standard_error(const Eigen::VectorXd& samples, 
-                          double ess=std::numeric_limits<double>::quiet_NaN()){
-    double mean = samples.array().mean();
-    double sigma = std::sqrt(((samples.array() - mean) / 
-                              std::sqrt(samples.size() - 1.0)).square().sum());
-    if(std::isnan(ess)){
-      ess = calculate_sample_ess(samples);
+
+  inline double ESS_MCSE(double *ess, double *mcse,std::vector<const double*> draws,
+                                              std::vector<size_t> sizes) {
+    int num_chains = sizes.size();
+    size_t num_draws = sizes[0];
+    for (int chain = 1; chain < num_chains; ++chain) {
+      num_draws = std::min(num_draws, sizes[chain]);
     }
-    return sigma / std::sqrt(ess);
-  }
 
-  double stochastic_gradient_ascent_rb(Q& variational, double eta,
-                                        double tol_rel_obj, int max_iterations,
-                                        callbacks::logger& logger,
-                                        callbacks::writer& diagnostic_writer) const {
-    static const char* function
-            = "stan::variational::advi::stochastic_gradient_ascent_rb";
-    return 0.0; // temporary value
-  }
+    if (num_draws < 4) {
+      return std::numeric_limits<double>::quiet_NaN();
+    }
 
-  /*double run_rb(const Q& variational, double rhat_cut, double mcse_cut, double ess_cut, double chains, double Tmax, callbacks::logger& logger)
-    const {
-      static const char* function = "stan::variational::advi::run_RVI";
-      double lr;
-      double window;
-      double khat;
-      double cont_params_ = variational.mean();
-      lr = lr(variational);
+    // check if chains are constant; all equal to first draw's value
+    bool are_all_const = false;
+    Eigen::VectorXd init_draw = Eigen::VectorXd::Zero(num_chains);
 
-      int dim = variational.dimension();
-      Eigen::VectorXd zeta(dim);
-      for (int i=0; i< Tmax; i++){
-        for (int c=0; c < chains; c++){
-          Q history_params[c] = Q(model_.num_params_r());
-          double param = stochastic_gradient_ascent_rb(variational, eta, tol_rel_obj, max_iterations,
-                                                         logger, diagnostic_writer);
-          history_params.insert(history_params.begin(), param);
+    for (int chain_idx = 0; chain_idx < num_chains; chain_idx++) {
+      Eigen::Map<const Eigen::Matrix<double, Eigen::Dynamic, 1>> draw(
+              draws[chain_idx], sizes[chain_idx]);
+
+      for (int n = 0; n < num_draws; n++) {
+        if (!std::isfinite(draw(n))) {
+          return std::numeric_limits<double>::quiet_NaN();
         }
-        if (t % W == 0)
-          bool rhat_cvg;
-          for(int k; k < dim; k++) {
-            if (rhat(history_params[k]) > rhat_cut) {
-              rhat_cvg = FALSE
-            }
-          }
-          if (rhat_cvg){
-            int T0 = t;
-            break;
-          }
       }
-      khat = gpdfit(log(1 + history_params^2) / 2 + lr);
 
-      if (rhat_cvg or khat > 1.0){
-          logger.info(
-                  "Optimization may not have converged"
-          );
-        return mean(history_params[T0:t])
-      }
-      for (int i = T0; i < Tmax; i++){
-        double param = stochastic_gradient_ascent_rb(variational, eta, tol_rel_obj, max_iterations,
-                                                     logger, diagnostic_writer);
-        history_params.insert(history_params.begin(), param);
-        if ((t - T0) % W == 0) & (MCSE < mcse_cut) & (ESS > ess_cut){
-          return mean(history_params[T0:t])
+      init_draw(chain_idx) = draw(0);
+
+      if (draw.isApproxToConstant(draw(0))) {
+        are_all_const |= true;
       }
     }
-  }*/
 
-  // TODO(akucukelbir): move these things to stan math and test there
+    if (are_all_const) {
+      // If all chains are constant then return NaN
+      // if they all equal the same constant value
+      if (init_draw.isApproxToConstant(init_draw(0))) {
+        return std::numeric_limits<double>::quiet_NaN();
+      }
+    }
+
+    Eigen::Matrix<Eigen::VectorXd, Eigen::Dynamic, 1> acov(num_chains);
+    Eigen::VectorXd chain_mean(num_chains);
+    Eigen::VectorXd chain_sq_mean(num_chains);
+    Eigen::VectorXd chain_var(num_chains);
+    for (int chain = 0; chain < num_chains; ++chain) {
+      Eigen::Map<const Eigen::Matrix<double, Eigen::Dynamic, 1>> draw(
+              draws[chain], sizes[chain]);
+      stan::analyze::autocovariance<double>(draw, acov(chain));
+      chain_mean(chain) = draw.mean();
+      chain_sq_mean(chain) = draw.array().square().mean();
+      chain_var(chain) = acov(chain)(0) * num_draws / (num_draws - 1);
+    }
+
+    double mean_var = chain_var.mean();
+    double var_plus = mean_var * (num_draws - 1) / num_draws;
+    if (num_chains > 1)
+      var_plus += math::variance(chain_mean);
+    Eigen::VectorXd rho_hat_s(num_draws);
+    rho_hat_s.setZero();
+    Eigen::VectorXd acov_s(num_chains);
+    for (int chain = 0; chain < num_chains; ++chain)
+      acov_s(chain) = acov(chain)(1);
+    double rho_hat_even = 1.0;
+    rho_hat_s(0) = rho_hat_even;
+    double rho_hat_odd = 1 - (mean_var - acov_s.mean()) / var_plus;
+    rho_hat_s(1) = rho_hat_odd;
+
+    // Convert raw autocovariance estimators into Geyer's initial
+    // positive sequence. Loop only until num_draws - 4 to
+    // leave the last pair of autocorrelations as a bias term that
+    // reduces variance in the case of antithetical chains.
+    size_t s = 1;
+    while (s < (num_draws - 4) && (rho_hat_even + rho_hat_odd) > 0) {
+      for (int chain = 0; chain < num_chains; ++chain)
+        acov_s(chain) = acov(chain)(s + 1);
+      rho_hat_even = 1 - (mean_var - acov_s.mean()) / var_plus;
+      for (int chain = 0; chain < num_chains; ++chain)
+        acov_s(chain) = acov(chain)(s + 2);
+      rho_hat_odd = 1 - (mean_var - acov_s.mean()) / var_plus;
+      if ((rho_hat_even + rho_hat_odd) >= 0) {
+        rho_hat_s(s + 1) = rho_hat_even;
+        rho_hat_s(s + 2) = rho_hat_odd;
+      }
+      s += 2;
+    }
+
+    int max_s = s;
+    // this is used in the improved estimate, which reduces variance
+    // in antithetic case -- see tau_hat below
+    if (rho_hat_even > 0)
+      rho_hat_s(max_s + 1) = rho_hat_even;
+
+    // Convert Geyer's initial positive sequence into an initial
+    // monotone sequence
+    for (int s = 1; s <= max_s - 3; s += 2) {
+      if (rho_hat_s(s + 1) + rho_hat_s(s + 2) > rho_hat_s(s - 1) + rho_hat_s(s)) {
+        rho_hat_s(s + 1) = (rho_hat_s(s - 1) + rho_hat_s(s)) / 2;
+        rho_hat_s(s + 2) = rho_hat_s(s + 1);
+      }
+    }
+
+    double num_total_draws = num_chains * num_draws;
+    // Geyer's truncated estimator for the asymptotic variance
+    // Improved estimate reduces variance in antithetic case
+    double tau_hat = -1 + 2 * rho_hat_s.head(max_s).sum() + rho_hat_s(max_s + 1);
+    double ess_val = num_total_draws / tau_hat;
+    *ess = ess_val;
+    *mcse = std::sqrt((chain_sq_mean.mean() - chain_mean.mean() * chain_mean.mean())/ess_val);
+  }
+
+//  double run_rb(const Q& variational, double rhat_cut, double mcse_cut, double ess_cut, double chains, double Tmax, callbacks::logger& logger)
+//    const {
+//      static const char* function = "stan::variational::advi::run_RVI";
+//      double window, khat, ess, mcse, eta;
+//      double cont_params_ = variational.mean();
+//      int dim = variational.dimension();
+//      Eigen::VectorXd zeta(dim);
+//      double adapt_iterations = 1000; // TODO relocate to input
+//      eta = adapt_eta(variational, adapt_iterations, logger);
+//      for (int i=0; i< Tmax; i++){
+//        for (int c=0; c < chains; c++){
+//          Q history_params[c] = Q(model_.num_params_r());
+//          double param = stochastic_gradient_ascent(variational, eta, tol_rel_obj, max_iterations,
+//                                                         logger, diagnostic_writer);
+//          history_params.insert(history_params.begin(), param);
+//        }
+//        ess_mcse(&ess, &mcse, history_params, size); // J chains of W parameters stored
+//        rhat =  rhat() //use only recent W
+//
+//        if (t % W == 0)
+//          bool rhat_cvg;
+//          for(int k; k < dim; k++) {
+//            if (rhat(history_params[k]) > rhat_cut) {
+//              rhat_cvg = FALSE
+//            }
+//          }
+//          if (rhat_cvg){
+//            int T0 = t;
+//            break;
+//          }
+//      }
+//      test_advi.gpdfit(x, advi_k, advi_sigma, false);
+//      if (rhat_cvg or khat > 1.0){
+//          logger.info(
+//                  "Optimization may not have converged"
+//          );
+//        return mean(history_params[T0:t])
+//      }
+//      for (int i = T0; i < Tmax; i++){
+//        double param = stochastic_gradient_ascent_rb(variational, eta, tol_rel_obj, max_iterations,
+//                                                     logger, diagnostic_writer);
+//        history_params.insert(history_params.begin(), param);
+//        if ((t - T0) % W == 0) & (MCSE < mcse_cut) & (ESS > ess_cut){
+//          return mean(history_params[T0:t])
+//      }
+//    }
+//  }
 
   /**
    * Compute the median of a circular buffer.
