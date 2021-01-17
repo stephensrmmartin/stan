@@ -150,7 +150,7 @@ class normal_fullrank : public base_family {
     for(int n = 1; n <= dimension(); n++){
       e = n * dimension() - 1;
       for(int j = s; j <= e; j++){
-        cov_components(idx++) = (*(cov_ptr + j));
+        cov_components(idx++) = *(cov_ptr + j);
       }
       s = e + n + 1;
     }
