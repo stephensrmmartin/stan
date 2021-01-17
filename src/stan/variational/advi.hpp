@@ -805,6 +805,9 @@ class advi {
 
     const double eta = adapt_eta(variational, adapt_iterations, logger);
 
+    //Q variational_obj = Q(cont_params_); // variational object
+    std::vector<Q> variational_obj_vec;
+
     // for each chain, save variational parameter values on matrix
     // of dim (n_iter, n_params)
     typedef Eigen::Matrix<double, Eigen::Dynamic, 
@@ -812,16 +815,18 @@ class advi {
     std::vector<histMat> hist_vector(num_chains);
     for(int i = 0; i < num_chains; i++){
       hist_vector.push_back(histMat(max_runs, n_approx_params));
+      variational_obj_vec.push_back(Q(cont_params_));
     }
     
-    Q variational_obj = Q(cont_params_); // variational object
+    
     Q elbo_grad = Q(cont_params_); // elbo grad
 
     bool keep_running = true;
     for (int n_iter = 0; n_iter < max_runs; n_iter++){
       for (int n_chain = 0; n_chain < num_chains; n_chain++){
         // TODO: Update lambda here with SGA
-        hist_vector[n_chain].col(n_iter) = variational_obj.return_params();
+        
+        hist_vector[n_chain].col(n_iter) = variational_obj[n_chain].return_params();
       }
 
       if (n_iter % eval_window == 0 || n_iter == max_runs-1){
@@ -832,7 +837,7 @@ class advi {
           if(num_chains == 1){
             // use split rhat
             chain_length.insert(chain_length.end(), (size_t)n_iter/2, (size_t)n_iter/2);
-            hist_ptrs.push_back(*hist_vector[0].row().data());
+            hist_ptrs.push_back(*hist_vector[0].row(k).data());
             hist_ptrs.push_back(hist_ptrs[0] + chain_length[0]);
           }
           else{
@@ -854,6 +859,17 @@ class advi {
       }
     }
 
+    bool khat_failed = false;
+    for(int k = 0; k < num_chains; k++){
+      std::vector<double> iw_vec(n_posterior_samples_);
+      lr(variational_obj_vec[k], iw_vec);
+      double khat, sigma;
+      gpdfit(iw_vec, khat, sigma);
+      if(khat > 1.0) { khat_failed = true };
+    }
+    if (khat_failed || max_rhat < rhat_cut){
+      logger.warn("Optimization may have not converged");
+    }
 
     // test_advi.gpdfit(x, advi_k, advi_sigma, false);
     // if (rhat_cvg or khat > 1.0){
