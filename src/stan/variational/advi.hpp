@@ -667,8 +667,9 @@ class advi {
    * @return Calculated MCSE
    */
 
-  inline double ESS_MCSE(double *ess, double *mcse,std::vector<const double*> draws,
-                                              std::vector<size_t> sizes) {
+  inline double ESS_MCSE(double &ess, double &mcse,
+                        const std::vector<const double*> draws,
+                        const std::vector<size_t> sizes) {
     int num_chains = sizes.size();
     size_t num_draws = sizes[0];
     for (int chain = 1; chain < num_chains; ++chain) {
@@ -774,57 +775,83 @@ class advi {
     // Improved estimate reduces variance in antithetic case
     double tau_hat = -1 + 2 * rho_hat_s.head(max_s).sum() + rho_hat_s(max_s + 1);
     double ess_val = num_total_draws / tau_hat;
-    *ess = ess_val;
-    *mcse = std::sqrt((chain_sq_mean.mean() - chain_mean.mean() * chain_mean.mean())/ess_val);
+    ess = ess_val;
+    mcse = std::sqrt((chain_sq_mean.mean() - chain_mean.mean() * chain_mean.mean())/ess_val);
   }
 
-//  double run_rb(const Q& variational, double rhat_cut, double mcse_cut, double ess_cut, double chains, double Tmax, callbacks::logger& logger)
-//    const {
-//      static const char* function = "stan::variational::advi::run_RVI";
-//      double window, khat, ess, mcse, eta;
-//      double cont_params_ = variational.mean();
-//      int dim = variational.dimension();
-//      Eigen::VectorXd zeta(dim);
-//      double adapt_iterations = 1000; // TODO relocate to input
-//      eta = adapt_eta(variational, adapt_iterations, logger);
-//      for (int i=0; i< Tmax; i++){
-//        for (int c=0; c < chains; c++){
-//          Q history_params[c] = Q(model_.num_params_r());
-//          double param = stochastic_gradient_ascent(variational, eta, tol_rel_obj, max_iterations,
-//                                                         logger, diagnostic_writer);
-//          history_params.insert(history_params.begin(), param);
-//        }
-//        ess_mcse(&ess, &mcse, history_params, size); // J chains of W parameters stored
-//        rhat =  rhat() //use only recent W
-//
-//        if (t % W == 0)
-//          bool rhat_cvg;
-//          for(int k; k < dim; k++) {
-//            if (rhat(history_params[k]) > rhat_cut) {
-//              rhat_cvg = FALSE
-//            }
-//          }
-//          if (rhat_cvg){
-//            int T0 = t;
-//            break;
-//          }
-//      }
-//      test_advi.gpdfit(x, advi_k, advi_sigma, false);
-//      if (rhat_cvg or khat > 1.0){
-//          logger.info(
-//                  "Optimization may not have converged"
-//          );
-//        return mean(history_params[T0:t])
-//      }
-//      for (int i = T0; i < Tmax; i++){
-//        double param = stochastic_gradient_ascent_rb(variational, eta, tol_rel_obj, max_iterations,
-//                                                     logger, diagnostic_writer);
-//        history_params.insert(history_params.begin(), param);
-//        if ((t - T0) % W == 0) & (MCSE < mcse_cut) & (ESS > ess_cut){
-//          return mean(history_params[T0:t])
-//      }
-//    }
-//  }
+  /**
+   * Run Robust Variational Inference.
+   * A. Dhaka et al., 2020
+   * 
+   * @param[in] max_runs Max number of VI iterations
+   * @param[in] rhat_cut Threshold for Rhat diagnostics
+   * @param[in] mcse_cut Threshold for MCSE diagnostics
+   * @param[in] ess_cut Threshold for effective sample size diagnostics
+   * @param[in] num_chains Number of VI chains to run simultaneously
+   * @param[in] logger logger
+   */
+  double run_rb(const int max_runs, const int eval_window, const double rhat_cut, 
+               const double mcse_cut, const double ess_cut, 
+               const int num_chains, const int adapt_iterations, 
+               callbacks::logger& logger) const {
+
+    static const char* function = "stan::variational::advi::run_RVI";
+     
+    double khat, ess, mcse, max_rhat;
+    int T0;
+
+    const int dim = variational.dimension();
+    const int n_approx_params = variational.num_approx_params();
+
+    const double eta = adapt_eta(variational, adapt_iterations, logger);
+
+    // for each chain, save variational parameter values on matrix
+    // of dim (n_iter, n_params)
+    std::vector<Eigen::MatrixXd> hist_vector(num_chains);
+    vector<const double*> hist_ptrs; // index each param(index each row)
+    
+    Q variational_obj = Q(cont_params_); // variational object
+    Q elbo_grad = Q(cont_params_); // elbo grad
+
+    bool keep_running = true;
+    for (int n_iter = 0; n_iter < max_runs; n_iter++){
+      for (int n_chain = 0; n_chain < num_chains; n_chain++){
+        // TODO: Update lambda here with SGA
+        hist_vector(n_chain).col(n_iter) = variational_obj.return_params();
+      }
+      if (n_iter % eval_window == 0 || n_iter == max_runs-1){
+        max_rhat = std::numeric_limits<double>::lowest(), rhat_val;
+        for(int k = 0; k < n_approx_params; k++) {
+          rhat_val = rhat(k);
+          max_rhat = max_rhat > rhat_val ? max_rhat : rhat_val;
+          if (max_rhat < rhat_cut) {
+            T0 = t;
+            keep_running = false;
+          }
+        }
+        if (!keep_running){
+          break;
+        }
+      }
+    }
+
+
+    // test_advi.gpdfit(x, advi_k, advi_sigma, false);
+    // if (rhat_cvg or khat > 1.0){
+    //     logger.info(
+    //             "Optimization may not have converged"
+    //     );
+    //   return mean(history_params[T0:t])
+    // }
+    // for (int i = T0; i < Tmax; i++){
+    //   double param = stochastic_gradient_ascent_rb(variational, eta, tol_rel_obj, max_iterations,
+    //                                               logger, diagnostic_writer);
+    //   history_params.insert(history_params.begin(), param);
+    //   if ((t - T0) % W == 0) & (MCSE < mcse_cut) & (ESS > ess_cut){
+    //     return mean(history_params[T0:t])
+    //   }
+    // }
+  }
 
   /**
    * Compute the median of a circular buffer.

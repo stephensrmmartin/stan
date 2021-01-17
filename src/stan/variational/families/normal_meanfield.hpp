@@ -95,6 +95,22 @@ class normal_meanfield : public base_family {
   const Eigen::VectorXd& omega() const { return omega_; }
 
   /**
+   * Return the approximation family's parameters as a single vector
+   */
+  Eigen::VectorXd return_approx_params() const {
+    Eigen::VectorXd ret_vec(dimension() * 2);
+    ret_vec << mu(), omega();
+    return ret_vec;
+  }
+
+  /**
+   * Return the number of approximation parameters lambda for Q(lambda)
+   */
+  const int num_approx_params() const {
+    return dimension() * 2;
+  }
+
+  /**
    * Set the mean vector to the specified value.
    *
    * @param[in] mu Mean vector.

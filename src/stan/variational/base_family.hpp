@@ -19,6 +19,16 @@ class base_family {
    */
   virtual int dimension() const = 0;
 
+  /**
+   * Return the approximation family's parameters as a single vector
+   */
+  virtual Eigen::VectorXd return_approx_params() const = 0;
+
+  /**
+   * Return the number of approximation parameters lambda for Q(lambda)
+   */
+  virtual const int num_approx_params() const = 0;
+
   // Distribution-based operations
   virtual const Eigen::VectorXd& mean() const = 0;
   virtual double entropy() const = 0;
