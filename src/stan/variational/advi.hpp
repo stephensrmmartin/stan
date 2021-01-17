@@ -797,7 +797,7 @@ class advi {
 
     static const char* function = "stan::variational::advi::run_RVI";
      
-    double khat, ess, mcse, max_rhat;
+    double khat, ess, mcse, max_rhat, rhat_val;
     int T0;
 
     const int dim = variational.dimension();
@@ -808,7 +808,7 @@ class advi {
     // for each chain, save variational parameter values on matrix
     // of dim (n_iter, n_params)
     std::vector<Eigen::MatrixXd> hist_vector(num_chains);
-    vector<const double*> hist_ptrs; // index each param(index each row)
+    std::vector<const double*> hist_ptrs; // index each param(index each row)
     
     Q variational_obj = Q(cont_params_); // variational object
     Q elbo_grad = Q(cont_params_); // elbo grad
@@ -817,10 +817,10 @@ class advi {
     for (int n_iter = 0; n_iter < max_runs; n_iter++){
       for (int n_chain = 0; n_chain < num_chains; n_chain++){
         // TODO: Update lambda here with SGA
-        hist_vector(n_chain).col(n_iter) = variational_obj.return_params();
+        hist_vector[n_chain].col(n_iter) = variational_obj.return_params();
       }
       if (n_iter % eval_window == 0 || n_iter == max_runs-1){
-        max_rhat = std::numeric_limits<double>::lowest(), rhat_val;
+        max_rhat = std::numeric_limits<double>::lowest();
         for(int k = 0; k < n_approx_params; k++) {
           rhat_val = rhat(k);
           max_rhat = max_rhat > rhat_val ? max_rhat : rhat_val;
