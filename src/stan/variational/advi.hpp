@@ -797,7 +797,7 @@ class advi {
 
     static const char* function = "stan::variational::advi::run_RVI";
      
-    double khat, ess, mcse, max_rhat, rhat_val;
+    double khat, ess, mcse, max_rhat, rhat;
     int T0;
 
     const int dim = variational.dimension();
@@ -807,8 +807,12 @@ class advi {
 
     // for each chain, save variational parameter values on matrix
     // of dim (n_iter, n_params)
-    std::vector<Eigen::MatrixXd> hist_vector(num_chains);
-    std::vector<const double*> hist_ptrs; // index each param(index each row)
+    typedef Eigen::Matrix<double, Eigen::Dynamic, 
+                          Eigen::Dynamic, Eigen::RowMajor> histMat;
+    std::vector<histMat> hist_vector(num_chains);
+    for(int i = 0; i < num_chains; i++){
+      hist_vector.push_back(histMat(max_runs, n_approx_params));
+    }
     
     Q variational_obj = Q(cont_params_); // variational object
     Q elbo_grad = Q(cont_params_); // elbo grad
@@ -819,11 +823,26 @@ class advi {
         // TODO: Update lambda here with SGA
         hist_vector[n_chain].col(n_iter) = variational_obj.return_params();
       }
+
       if (n_iter % eval_window == 0 || n_iter == max_runs-1){
         max_rhat = std::numeric_limits<double>::lowest();
         for(int k = 0; k < n_approx_params; k++) {
-          rhat_val = rhat(k);
-          max_rhat = max_rhat > rhat_val ? max_rhat : rhat_val;
+          std::vector<const double*> hist_ptrs;
+          std::vector<size_t> chain_length;
+          if(num_chains == 1){
+            // use split rhat
+            chain_length.insert(chain_length.end(), (size_t)n_iter/2, (size_t)n_iter/2);
+            hist_ptrs.push_back(*hist_vector[0].row().data());
+            hist_ptrs.push_back(hist_ptrs[0] + chain_length[0]);
+          }
+          else{
+            for(int i = 0; i < num_chains; i++){
+              chain_length.push_back((size_t) hist_vector[i].rows());
+              hist_ptrs.push_back(hist_vector[i].row(k).data());
+            }
+          }
+          rhat = stan::analyze::compute_potential_scale_reduction(hist_ptrs, chain_length);
+          max_rhat = max_rhat > rhat ? max_rhat : rhat;
           if (max_rhat < rhat_cut) {
             T0 = t;
             keep_running = false;
