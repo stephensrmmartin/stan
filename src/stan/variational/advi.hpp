@@ -794,18 +794,19 @@ class advi {
                const double mcse_cut, const double ess_cut, 
                const int num_chains, const int adapt_iterations, 
                callbacks::logger& logger) const {
-
     static const char* function = "stan::variational::advi::run_RVI";
      
     double khat, ess, mcse, max_rhat, rhat;
     int T0;
 
-    const int dim = variational.dimension();
+    // Initialize variational approximation
+    Q variational = Q(cont_params_); // variational object
+
+    /*const int dim = variational.dimension();
     const int n_approx_params = variational.num_approx_params();
 
     const double eta = adapt_eta(variational, adapt_iterations, logger);
 
-    //Q variational_obj = Q(cont_params_); // variational object
     std::vector<Q> variational_obj_vec;
 
     // for each chain, save variational parameter values on matrix
@@ -817,7 +818,6 @@ class advi {
       hist_vector.push_back(histMat(max_runs, n_approx_params));
       variational_obj_vec.push_back(Q(cont_params_));
     }
-    
     
     Q elbo_grad = Q(cont_params_); // elbo grad
 
@@ -869,7 +869,7 @@ class advi {
     }
     if (khat_failed || max_rhat < rhat_cut){
       logger.warn("Optimization may have not converged");
-    }
+      }*/
 
     // test_advi.gpdfit(x, advi_k, advi_sigma, false);
     // if (rhat_cvg or khat > 1.0){
@@ -886,6 +886,8 @@ class advi {
     //     return mean(history_params[T0:t])
     //   }
     // }
+
+    return 0.0;
   }
 
   /**
