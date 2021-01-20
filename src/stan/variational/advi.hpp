@@ -5,6 +5,7 @@
 #include <stan/analyze/mcmc/autocovariance.hpp>
 #include <stan/analyze/mcmc/compute_effective_sample_size.hpp>
 #include <stan/analyze/mcmc/compute_potential_scale_reduction.hpp>
+#include <stan/analyze/mcmc/estimate_gpd_params.hpp>
 #include <stan/callbacks/logger.hpp>
 #include <stan/callbacks/writer.hpp>
 #include <stan/callbacks/stream_writer.hpp>
@@ -24,7 +25,6 @@
 #include <string>
 #include <vector>
 #include <cmath>
-#include <limits>
 namespace stan {
 
 namespace variational {
@@ -551,86 +551,6 @@ class advi {
   }
 
   /**
-  * RVI Diagnostics: Approximate parameters k and sigma for pareto-k diagnostics
-  * from a given sample vector x
-  * Zhang, Stephens (2009)
-  * 
-  * @param[in] x Vector of values in which pareto parameters will be estimated
-  * @param[in, out] k_ret Variable to return the estimated k value.
-  * @param[in, out] sigma Variable to return the estimated sigma value.
-  * @param[in] wip Boolean indicating whether to use a weakly informed prior
-  * @param[in] min_grid_pts The minimum number of grid points used in the fitting 
-  * algorithm. The actual number used is `min_grid_pts + floor(sqrt(length(x)))`
-  * @param[in] sort_x If `true` (the default), the first step in the fitting
-  * algorithm is to sort the elements of `x`. If `x` is already sorted in
-  * ascending order then `sort_x` can be set to `false` to skip the initial
-  * sorting step.
-
-  */
-  static void gpdfit(Eigen::VectorXd& x, double& k, double& sigma, 
-              const bool wip = true, const int min_grid_pts = 30, 
-              bool sort_x = true){
-    //See section 4 of Zhang and Stephens (2009) #TODO translate r to c
-
-    // R function definitions
-    auto lx = [&](const Eigen::VectorXd a, const Eigen::VectorXd x,
-            Eigen::VectorXd& ret_mat) mutable {
-      Eigen::VectorXd tmp_mat(x.size());
-      ret_mat.resize(a.size());
-      for(int i = 0; i < a.size(); i++){
-        tmp_mat = x * -a(i);
-        ret_mat(i) = tmp_mat.array().log1p().mean();
-        ret_mat(i) = std::log(-a(i) / ret_mat(i)) - ret_mat(i) - 1;
-      }
-      ret_mat = ret_mat.matrix();
-    };
-
-    auto adjust_k_wip = [&](double k_, double n_) mutable {
-      int a = 10, n_plus_a = n_ + a;
-      return k_ * n_ / n_plus_a + a * 0.5 / n_plus_a;
-    };
-    // end function definitions
-
-    if (sort_x) {
-      std::sort(x.data(), x.data() + x.size());
-    }
-
-    const int N = x.size(), prior = 3, M = min_grid_pts + 
-                                           std::floor(std::sqrt(N));
-    Eigen::VectorXd jj(M);
-    for(int i = 0; i < M; i++){
-      jj(i) = i + 1;  // seq_len(M) (cpp indexing)
-    }
-
-    Eigen::VectorXd theta(M);
-    double xstar = x((int)std::floor(N / 4 + 0.5));
-
-    theta = 1 / x(N-1) + (1 - (M / (jj.array() - 0.5)).sqrt()) / prior / xstar;
-    theta = theta.matrix();
-
-    Eigen::VectorXd l_theta(theta.size());
-    lx(theta, x, l_theta);
-    l_theta *= N;
-    
-    Eigen::VectorXd w_theta = Eigen::VectorXd::Ones(l_theta.size());
-    for(int i = 0; i < w_theta.size(); i++){
-      w_theta(i) = 1 / (l_theta.array() - l_theta(jj(i) - 1)).exp().sum();
-      // subtract 1 from jj(i) to convert to cpp index
-    }
-    double theta_hat = (theta.array() * w_theta.array()).sum();
-    k = (-theta_hat * x.array()).log1p().mean();
-    sigma = -k / theta_hat;
-
-    if(wip){
-      k = adjust_k_wip(k, N);
-    }
-
-    if(std::isnan(k)){
-      k = std::numeric_limits<double>::infinity();
-    }
-  }
-
-  /**
    * RVI Diagnostics
    * A sample function to show how compute_effective_sample_size() in
    * stan/analyze/mcmc/compute_effective_sample_size.hpp would be used.
@@ -667,7 +587,7 @@ class advi {
    * @return Calculated MCSE
    */
 
-  inline double ESS_MCSE(double &ess, double &mcse,
+  static void ESS_MCSE(double &ess, double &mcse,
                         const std::vector<const double*> draws,
                         const std::vector<size_t> sizes) {
     int num_chains = sizes.size();
@@ -790,24 +710,24 @@ class advi {
    * @param[in] num_chains Number of VI chains to run simultaneously
    * @param[in] logger logger
    */
-  double run_rb(const int max_runs, const int eval_window, const double rhat_cut, 
+  void run_rvi(const int max_runs, const int eval_window, const double rhat_cut, 
                const double mcse_cut, const double ess_cut, 
                const int num_chains, const int adapt_iterations, 
                callbacks::logger& logger) const {
-    static const char* function = "stan::variational::advi::run_RVI";
      
     double khat, ess, mcse, max_rhat, rhat;
-    int T0;
+    int T0 = max_runs - 1;
 
     // Initialize variational approximation
-    Q variational = Q(cont_params_); // variational object
 
-    /*const int dim = variational.dimension();
+    const int dim = variational.dimension();
     const int n_approx_params = variational.num_approx_params();
 
     const double eta = adapt_eta(variational, adapt_iterations, logger);
 
     std::vector<Q> variational_obj_vec;
+    std::vector<Q> elbo_grad_vec;
+    std::vector<Q> elbo_grad_square_vec;
 
     // for each chain, save variational parameter values on matrix
     // of dim (n_iter, n_params)
@@ -817,15 +737,26 @@ class advi {
     for(int i = 0; i < num_chains; i++){
       hist_vector.push_back(histMat(max_runs, n_approx_params));
       variational_obj_vec.push_back(Q(cont_params_));
+      elbo_grad_vec.push_back(Q(cont_params_));
+      elbo_grad_square_vec.push_back(Q(cont_params_));
     }
     
-    Q elbo_grad = Q(cont_params_); // elbo grad
 
     bool keep_running = true;
     for (int n_iter = 0; n_iter < max_runs; n_iter++){
       for (int n_chain = 0; n_chain < num_chains; n_chain++){
-        // TODO: Update lambda here with SGA
-        
+        calc_ELBO_grad(variational_obj_vec[n_chain], elbo_grad_vec[n_chain], logger);
+        if (n_iter == 0) {
+          elbo_grad_square_vec[n_chain] += elbo_grad_vec[n_chain].square();
+        }
+        else {
+          elbo_grad_square_vec[n_chain] = 0.9 * elbo_grad_square_vec[n_chain]
+                                          + 0.1 * elbo_grad_vec[n_chain].square();
+        }
+
+        variational_obj_vec[n_chain] += elbo_grad_vec[n_chain] * eta / 
+                                        sqrt(elbo_grad_square_vec[n_chain])
+
         hist_vector[n_chain].col(n_iter) = variational_obj[n_chain].return_params();
       }
 
@@ -836,24 +767,22 @@ class advi {
           std::vector<size_t> chain_length;
           if(num_chains == 1){
             // use split rhat
-            chain_length.insert(chain_length.end(), (size_t)n_iter/2, (size_t)n_iter/2);
+            chain_length.insert(chain_length.end(), static_cast<size_t>(n_iter/2), static_cast<size_t>(n_iter/2));
             hist_ptrs.push_back(*hist_vector[0].row(k).data());
             hist_ptrs.push_back(hist_ptrs[0] + chain_length[0]);
           }
           else{
             for(int i = 0; i < num_chains; i++){
-              chain_length.push_back((size_t) hist_vector[i].rows());
+              chain_length.push_back(static_cast<size_t>(hist_vector[i].rows()));
               hist_ptrs.push_back(hist_vector[i].row(k).data());
             }
           }
           rhat = stan::analyze::compute_potential_scale_reduction(hist_ptrs, chain_length);
           max_rhat = max_rhat > rhat ? max_rhat : rhat;
-          if (max_rhat < rhat_cut) {
-            T0 = t;
-            keep_running = false;
-          }
         }
-        if (!keep_running){
+
+        if (max_rhat < rhat_cut) {
+          T0 = n_iter;
           break;
         }
       }
@@ -864,30 +793,58 @@ class advi {
       std::vector<double> iw_vec(n_posterior_samples_);
       lr(variational_obj_vec[k], iw_vec);
       double khat, sigma;
-      gpdfit(iw_vec, khat, sigma);
+      stan::analyze::gpdfit(iw_vec, khat, sigma);
       if(khat > 1.0) { khat_failed = true };
     }
-    if (khat_failed || max_rhat < rhat_cut){
+    if (khat_failed || max_rhat < rhat_cut) {
       logger.warn("Optimization may have not converged");
-      }*/
+      // avarage parameters from the last eval_window param iterations
+      for(int i = 0; i < num_chains; i++){
+        variational_obj_vec[i].set_approx_params(
+          hist_vector[i].block(T0 - eval_window + 1, 0, eval_window, n_approx_params).rowwise().mean());
+      }
+    }
+    else {
+      for(int n_post_iter = T0; n_post_iter < max_runs; n_post_iter++){
+        for (int n_chain = 0; n_chain < num_chains; n_chain++){
+          calc_ELBO_grad(variational_obj_vec[n_chain], elbo_grad_vec[n_chain], logger);
+          elbo_grad_square_vec[n_chain] = 0.9 * elbo_grad_square_vec[n_chain]
+                                          + 0.1 * elbo_grad_vec[n_chain].square();
 
-    // test_advi.gpdfit(x, advi_k, advi_sigma, false);
-    // if (rhat_cvg or khat > 1.0){
-    //     logger.info(
-    //             "Optimization may not have converged"
-    //     );
-    //   return mean(history_params[T0:t])
-    // }
-    // for (int i = T0; i < Tmax; i++){
-    //   double param = stochastic_gradient_ascent_rb(variational, eta, tol_rel_obj, max_iterations,
-    //                                               logger, diagnostic_writer);
-    //   history_params.insert(history_params.begin(), param);
-    //   if ((t - T0) % W == 0) & (MCSE < mcse_cut) & (ESS > ess_cut){
-    //     return mean(history_params[T0:t])
-    //   }
-    // }
+          variational_obj_vec[n_chain] += elbo_grad_vec[n_chain] * eta / 
+                                          sqrt(elbo_grad_square_vec[n_chain])
 
-    return 0.0;
+          hist_vector[n_chain].col(n_post_iter) = variational_obj[n_chain].return_params();
+        }
+        if (n_post_iter - T0 % eval_window == 0) {
+          double min_ess = std::numeric_limits<double>::infinity(), max_mcse = std::numeric_limits<double>::lowest();
+          for(int k = 0; k < n_approx_params; k++){
+            std::vector<const double*> hist_ptrs;
+            std::vector<size_t> chain_length;
+            if(num_chains == 1){
+              // write split rhat again here
+            }
+            else {
+              for(int i = 0; i < num_chains; i++){
+                chain_length.push_back(static_cast<size_t>(n_post_iter - T0 + 1));
+                hist_ptrs.push_back(hist_vector[i].row(k).data() + static_cast<double>(T0));
+              }
+            }
+            double ess, mcse;
+            ESS_MCSE(ess, mcse, hist_ptrs, chain_length);
+            min_ess = std::max<double>(min_ess, ess);
+            max_mcse = std::min<double>(max_mcse, mcse);
+            if(max_mcse < mcse_cut && min_ess > ess_cut){
+              for(int i = 0; i < num_chains; i++){
+                  variational_obj_vec[i].set_approx_params(
+                  hist_vector[i].block(T0, 0, n_post_iter - T0 + 1, n_approx_params).rowwise().mean());
+              }
+              break;
+            }
+          }
+        }
+      }
+    }
   }
 
   /**
