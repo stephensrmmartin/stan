@@ -28,7 +28,7 @@ class base_family {
    * Set the approximation family's parameters from a single vector
    * @param[in] param_vec Vector in which parameter values to be set are stored
    */
-  virtual void set_approx_params(const Eigen::VectorXd& param_vec);
+  virtual void set_approx_params(const Eigen::VectorXd& param_vec) = 0;
   /**
    * Return the number of approximation parameters lambda for Q(lambda)
    */

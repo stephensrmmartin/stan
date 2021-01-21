@@ -587,7 +587,7 @@ class advi {
    * @return Calculated MCSE
    */
 
-  static void ESS_MCSE(double &ess, double &mcse,
+  static double ESS_MCSE(double &ess, double &mcse,
                         const std::vector<const double*> draws,
                         const std::vector<size_t> sizes) {
     int num_chains = sizes.size();
@@ -597,6 +597,8 @@ class advi {
     }
 
     if (num_draws < 4) {
+      ess = std::numeric_limits<double>::quiet_NaN();
+      mcse = std::numeric_limits<double>::quiet_NaN();
       return std::numeric_limits<double>::quiet_NaN();
     }
 
@@ -610,6 +612,8 @@ class advi {
 
       for (int n = 0; n < num_draws; n++) {
         if (!std::isfinite(draw(n))) {
+          ess = std::numeric_limits<double>::quiet_NaN();
+          mcse = std::numeric_limits<double>::quiet_NaN();
           return std::numeric_limits<double>::quiet_NaN();
         }
       }
@@ -625,6 +629,8 @@ class advi {
       // If all chains are constant then return NaN
       // if they all equal the same constant value
       if (init_draw.isApproxToConstant(init_draw(0))) {
+        ess = std::numeric_limits<double>::quiet_NaN();;
+        mcse = std::numeric_limits<double>::quiet_NaN();
         return std::numeric_limits<double>::quiet_NaN();
       }
     }
@@ -697,6 +703,7 @@ class advi {
     double ess_val = num_total_draws / tau_hat;
     ess = ess_val;
     mcse = std::sqrt((chain_sq_mean.mean() - chain_mean.mean() * chain_mean.mean())/ess_val);
+    return 0;
   }
 
   /**
@@ -715,35 +722,39 @@ class advi {
                const int num_chains, const int adapt_iterations, 
                callbacks::logger& logger) const {
      
-    double khat, ess, mcse, max_rhat, rhat;
+    double khat, ess, mcse, max_rhat, rhat, eta_scaled;
     int T0 = max_runs - 1;
 
     // Initialize variational approximation
 
+    Q variational(static_cast<size_t>(cont_params_.size())); // will hold final approximation
     const int dim = variational.dimension();
     const int n_approx_params = variational.num_approx_params();
 
     const double eta = adapt_eta(variational, adapt_iterations, logger);
-
     std::vector<Q> variational_obj_vec;
     std::vector<Q> elbo_grad_vec;
     std::vector<Q> elbo_grad_square_vec;
 
     // for each chain, save variational parameter values on matrix
-    // of dim (n_iter, n_params)
+    // of dim (n_params, n_iters)
     typedef Eigen::Matrix<double, Eigen::Dynamic, 
                           Eigen::Dynamic, Eigen::RowMajor> histMat;
-    std::vector<histMat> hist_vector(num_chains);
-    for(int i = 0; i < num_chains; i++){
-      hist_vector.push_back(histMat(max_runs, n_approx_params));
-      variational_obj_vec.push_back(Q(cont_params_));
-      elbo_grad_vec.push_back(Q(cont_params_));
-      elbo_grad_square_vec.push_back(Q(cont_params_));
-    }
-    
+    std::vector<histMat> hist_vector;
+    hist_vector.reserve(num_chains);
+    variational_obj_vec.reserve(num_chains);
+    elbo_grad_vec.reserve(num_chains);
+    elbo_grad_square_vec.reserve(num_chains);
 
-    bool keep_running = true;
+    for(int i = 0; i < num_chains; i++){
+      hist_vector.push_back(histMat(n_approx_params, max_runs));
+      variational_obj_vec.push_back(Q(cont_params_));
+      elbo_grad_vec.push_back(Q(dim));
+      elbo_grad_square_vec.push_back(Q(dim));
+    }
+
     for (int n_iter = 0; n_iter < max_runs; n_iter++){
+      eta_scaled = eta / sqrt(static_cast<double>(n_iter + 1));
       for (int n_chain = 0; n_chain < num_chains; n_chain++){
         calc_ELBO_grad(variational_obj_vec[n_chain], elbo_grad_vec[n_chain], logger);
         if (n_iter == 0) {
@@ -753,14 +764,13 @@ class advi {
           elbo_grad_square_vec[n_chain] = 0.9 * elbo_grad_square_vec[n_chain]
                                           + 0.1 * elbo_grad_vec[n_chain].square();
         }
+        variational_obj_vec[n_chain] += eta_scaled * elbo_grad_vec[n_chain] / (1.0 + elbo_grad_square_vec[n_chain].sqrt());
 
-        variational_obj_vec[n_chain] += elbo_grad_vec[n_chain] * eta / 
-                                        sqrt(elbo_grad_square_vec[n_chain])
-
-        hist_vector[n_chain].col(n_iter) = variational_obj[n_chain].return_params();
+        hist_vector[n_chain].col(n_iter) = variational_obj_vec[n_chain].return_approx_params();
       }
 
-      if (n_iter % eval_window == 0 || n_iter == max_runs-1){
+      if ((n_iter % eval_window == 0 && n_iter > 0) || n_iter == max_runs - 1){
+        logger.info(std::to_string(n_iter));
         max_rhat = std::numeric_limits<double>::lowest();
         for(int k = 0; k < n_approx_params; k++) {
           std::vector<const double*> hist_ptrs;
@@ -768,21 +778,26 @@ class advi {
           if(num_chains == 1){
             // use split rhat
             chain_length.insert(chain_length.end(), static_cast<size_t>(n_iter/2), static_cast<size_t>(n_iter/2));
-            hist_ptrs.push_back(*hist_vector[0].row(k).data());
+            hist_ptrs.push_back(hist_vector[0].row(k).data());
             hist_ptrs.push_back(hist_ptrs[0] + chain_length[0]);
           }
           else{
             for(int i = 0; i < num_chains; i++){
-              chain_length.push_back(static_cast<size_t>(hist_vector[i].rows()));
+              chain_length.push_back(static_cast<size_t>(n_iter));
               hist_ptrs.push_back(hist_vector[i].row(k).data());
             }
           }
           rhat = stan::analyze::compute_potential_scale_reduction(hist_ptrs, chain_length);
-          max_rhat = max_rhat > rhat ? max_rhat : rhat;
+          //rhat = 2.0;
+          max_rhat = std::max<double>(max_rhat, rhat);
         }
 
         if (max_rhat < rhat_cut) {
           T0 = n_iter;
+          std::stringstream ss;
+          ss << "Preliminary iterations terminated by rhat condition in iteration " << T0 <<
+          " with max reported Rhat value of " << max_rhat;
+          logger.info(ss);
           break;
         }
       }
@@ -790,18 +805,23 @@ class advi {
 
     bool khat_failed = false;
     for(int k = 0; k < num_chains; k++){
-      std::vector<double> iw_vec(n_posterior_samples_);
+      std::stringstream ss;
+      Eigen::VectorXd iw_vec(n_posterior_samples_);
       lr(variational_obj_vec[k], iw_vec);
-      double khat, sigma;
+      //ss << iw_vec;
+      double sigma;
       stan::analyze::gpdfit(iw_vec, khat, sigma);
-      if(khat > 1.0) { khat_failed = true };
+      
+      ss << "Chain " << k << "khat: " << khat;
+      logger.info(ss);
+      if(khat > 1.0) { khat_failed = true; };
     }
     if (khat_failed || max_rhat < rhat_cut) {
       logger.warn("Optimization may have not converged");
       // avarage parameters from the last eval_window param iterations
       for(int i = 0; i < num_chains; i++){
         variational_obj_vec[i].set_approx_params(
-          hist_vector[i].block(T0 - eval_window + 1, 0, eval_window, n_approx_params).rowwise().mean());
+          hist_vector[i].block(0, T0 - eval_window + 1, n_approx_params, eval_window).rowwise().mean());
       }
     }
     else {
@@ -811,10 +831,10 @@ class advi {
           elbo_grad_square_vec[n_chain] = 0.9 * elbo_grad_square_vec[n_chain]
                                           + 0.1 * elbo_grad_vec[n_chain].square();
 
-          variational_obj_vec[n_chain] += elbo_grad_vec[n_chain] * eta / 
-                                          sqrt(elbo_grad_square_vec[n_chain])
+          variational_obj_vec[n_chain] += eta * elbo_grad_vec[n_chain] / 
+                                          elbo_grad_square_vec[n_chain].sqrt();
 
-          hist_vector[n_chain].col(n_post_iter) = variational_obj[n_chain].return_params();
+          hist_vector[n_chain].col(n_post_iter) = variational_obj_vec[n_chain].return_approx_params();
         }
         if (n_post_iter - T0 % eval_window == 0) {
           double min_ess = std::numeric_limits<double>::infinity(), max_mcse = std::numeric_limits<double>::lowest();
@@ -827,7 +847,7 @@ class advi {
             else {
               for(int i = 0; i < num_chains; i++){
                 chain_length.push_back(static_cast<size_t>(n_post_iter - T0 + 1));
-                hist_ptrs.push_back(hist_vector[i].row(k).data() + static_cast<double>(T0));
+                hist_ptrs.push_back(hist_vector[i].row(k).data() + T0);
               }
             }
             double ess, mcse;
@@ -837,7 +857,7 @@ class advi {
             if(max_mcse < mcse_cut && min_ess > ess_cut){
               for(int i = 0; i < num_chains; i++){
                   variational_obj_vec[i].set_approx_params(
-                  hist_vector[i].block(T0, 0, n_post_iter - T0 + 1, n_approx_params).rowwise().mean());
+                  hist_vector[i].block(0, T0, n_approx_params, n_post_iter - T0 + 1).rowwise().mean());
               }
               break;
             }
@@ -845,6 +865,35 @@ class advi {
         }
       }
     }
+    variational.set_to_zero();
+    for(int i = 0; i < num_chains; i++){
+      variational += static_cast<double>(1)/num_chains * variational_obj_vec[i];
+    }
+
+    logger.info("Finished optimization");
+    cont_params_ = variational.mean();
+    std::vector<double> cont_vector(cont_params_.size());
+    for (int i = 0; i < cont_params_.size(); ++i)
+      cont_vector.at(i) = cont_params_(i);
+    std::vector<int> disc_vector;
+    std::vector<double> values;
+
+    std::stringstream msg;
+    model_.write_array(rng_, cont_vector, disc_vector, values, true, true,
+                       &msg);
+    if (msg.str().length() > 0)
+    logger.info(msg);
+    for(auto it : values){
+      logger.info(std::to_string(it));
+    }
+    for(int i = 0; i < num_chains; i++){
+      std::stringstream ss;
+      ss << "Chain " << i << " :" << variational_obj_vec[i].mean();
+      logger.info(ss);
+    }
+    std::stringstream ss;
+    ss << "Q variational: " << variational.mean();
+    logger.info(ss);
   }
 
   /**
