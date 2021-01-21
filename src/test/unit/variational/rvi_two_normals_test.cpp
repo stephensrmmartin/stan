@@ -42,5 +42,6 @@ TEST(rvi_test, two_normals_meanfield) {
 	      n_monte_carlo_elbo,
 	      eval_elbo, n_posterior_samples);
 
-  test_advi.run_rb(100, 10, 1.1, 1e-2, 10, 4, 100, logger); 
+  test_advi.run_rvi(2000, 10, 1.1, 20, 10, 4, 100, logger);
+  std::cout << log_stream.str() << std::endl;
 }
