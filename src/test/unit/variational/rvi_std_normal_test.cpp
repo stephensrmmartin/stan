@@ -23,9 +23,9 @@ TEST(rvi_test, std_normal_meanfield) {
   rng_t base_rng(0);
 
   // Other params
-  std::stringstream log_stream;
-  stan::callbacks::stream_logger logger(log_stream, log_stream, log_stream,
-                                        log_stream, log_stream);
+  stan::callbacks::stream_logger logger(std::cout, std::cout, std::cout,
+                                        std::cout, std::cout);
+  stan::callbacks::stream_writer stdout_writer(std::cout);
 
   // Dummy input
   Eigen::VectorXd cont_params = Eigen::VectorXd::Zero(1);
@@ -38,9 +38,9 @@ TEST(rvi_test, std_normal_meanfield) {
   int n_posterior_samples = 100;
   stan::variational::advi<Model, stan::variational::normal_meanfield, rng_t>
     test_advi(my_model, cont_params, base_rng, n_monte_carlo_grad,
-	      n_monte_carlo_elbo,
-	      eval_elbo, n_posterior_samples);
-
-  test_advi.run_rvi(1000, 50, 1.1, 20, 10, 4, 100, logger); 
-  std::cout << log_stream.str() << std::endl;
+	      n_monte_carlo_elbo, n_posterior_samples);
+  
+  test_advi.run(1.0, true, 250, 1000,
+		50, 1.1, 20, 10, 4, logger,
+		stdout_writer, stdout_writer); 
 }
