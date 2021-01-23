@@ -51,22 +51,19 @@ class advi {
    * @param[in,out] rng random number generator
    * @param[in] n_monte_carlo_grad number of samples for gradient computation
    * @param[in] n_monte_carlo_elbo number of samples for ELBO computation
-   * @param[in] eval_elbo evaluate ELBO at every "eval_elbo" iters
    * @param[in] n_posterior_samples number of samples to draw from posterior
    * @throw std::runtime_error if n_monte_carlo_grad is not positive
    * @throw std::runtime_error if n_monte_carlo_elbo is not positive
-   * @throw std::runtime_error if eval_elbo is not positive
    * @throw std::runtime_error if n_posterior_samples is not positive
    */
   advi(Model& m, Eigen::VectorXd& cont_params, BaseRNG& rng,
-       int n_monte_carlo_grad, int n_monte_carlo_elbo, int eval_elbo,
+       int n_monte_carlo_grad, int n_monte_carlo_elbo,
        int n_posterior_samples)
       : model_(m),
         cont_params_(cont_params),
         rng_(rng),
         n_monte_carlo_grad_(n_monte_carlo_grad),
         n_monte_carlo_elbo_(n_monte_carlo_elbo),
-        eval_elbo_(eval_elbo),
         n_posterior_samples_(n_posterior_samples) {
     static const char* function = "stan::variational::advi";
     math::check_positive(function,
@@ -74,8 +71,6 @@ class advi {
                          n_monte_carlo_grad_);
     math::check_positive(function, "Number of Monte Carlo samples for ELBO",
                          n_monte_carlo_elbo_);
-    math::check_positive(function, "Evaluate ELBO at every eval_elbo iteration",
-                         eval_elbo_);
     math::check_positive(function, "Number of posterior samples for output",
                          n_posterior_samples_);
   }
@@ -308,7 +303,7 @@ class advi {
    * @throw std::domain_error If the ELBO or its gradient is ever
    * non-finite, at any iteration
    */
-  void stochastic_gradient_ascent(Q& variational, double eta,
+  /*void stochastic_gradient_ascent(Q& variational, double eta,
                                   double tol_rel_obj, int max_iterations,
                                   callbacks::logger& logger,
                                   callbacks::writer& diagnostic_writer) const {
@@ -444,7 +439,7 @@ class advi {
         do_more_iterations = false;
       }
     }
-  }
+    }*/
 
   /**
    * Runs ADVI and writes to output.
@@ -460,7 +455,9 @@ class advi {
    * @param[in,out] diagnostic_writer writer for diagnostic information
    */
   int run(double eta, bool adapt_engaged, int adapt_iterations,
-          double tol_rel_obj, int max_iterations, callbacks::logger& logger,
+          int max_iterations, int eval_window, double rhat_cut,
+	  double mcse_cut, double ess_cut, int num_chains,
+	  callbacks::logger& logger,
           callbacks::writer& parameter_writer,
           callbacks::writer& diagnostic_writer) const {
     diagnostic_writer("iter,time_in_seconds,ELBO");
@@ -476,8 +473,14 @@ class advi {
       parameter_writer(ss.str());
     }
 
-    stochastic_gradient_ascent(variational, eta, tol_rel_obj, max_iterations,
-                               logger, diagnostic_writer);
+    run_rvi(variational, eta,
+	    max_iterations, eval_window,
+	    rhat_cut, mcse_cut, ess_cut, 
+	    num_chains, adapt_iterations, 
+	    logger);
+
+    //stochastic_gradient_ascent(variational, eta, tol_rel_obj, max_iterations,
+    //                           logger, diagnostic_writer);
 
     // Write posterior mean of variational approximations.
     cont_params_ = variational.mean();
@@ -717,7 +720,8 @@ class advi {
    * @param[in] num_chains Number of VI chains to run simultaneously
    * @param[in] logger logger
    */
-  void run_rvi(const int max_runs, const int eval_window, const double rhat_cut, 
+  void run_rvi(Q& variational, const double eta,
+	       const int max_runs, const int eval_window, const double rhat_cut, 
                const double mcse_cut, const double ess_cut, 
                const int num_chains, const int adapt_iterations, 
                callbacks::logger& logger) const {
@@ -725,13 +729,9 @@ class advi {
     double khat, ess, mcse, max_rhat, rhat, eta_scaled;
     int T0 = max_runs - 1;
 
-    // Initialize variational approximation
-
-    Q variational(static_cast<size_t>(cont_params_.size())); // will hold final approximation
     const int dim = variational.dimension();
     const int n_approx_params = variational.num_approx_params();
 
-    const double eta = adapt_eta(variational, adapt_iterations, logger);
     std::vector<Q> variational_obj_vec;
     std::vector<Q> elbo_grad_vec;
     std::vector<Q> elbo_grad_square_vec;
@@ -867,7 +867,7 @@ class advi {
     }
     variational.set_to_zero();
     for(int i = 0; i < num_chains; i++){
-      variational += static_cast<double>(1)/num_chains * variational_obj_vec[i];
+      variational += 1.0 /num_chains * variational_obj_vec[i];
     }
 
     logger.info("Finished optimization");
@@ -932,7 +932,6 @@ class advi {
   BaseRNG& rng_;
   int n_monte_carlo_grad_;
   int n_monte_carlo_elbo_;
-  int eval_elbo_;
   int n_posterior_samples_;
 };
 }  // namespace variational

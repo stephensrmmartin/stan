@@ -51,8 +51,9 @@ template <class Model>
 int meanfield(Model& model, const stan::io::var_context& init,
               unsigned int random_seed, unsigned int chain, double init_radius,
               int grad_samples, int elbo_samples, int max_iterations,
-              double tol_rel_obj, double eta, bool adapt_engaged,
-              int adapt_iterations, int eval_elbo, int output_samples,
+              double eta, int eval_window, double rhat_cut, double mcse_cut,
+	      double ess_cut, int num_chains, bool adapt_engaged,
+              int adapt_iterations, int output_samples,
               callbacks::interrupt& interrupt, callbacks::logger& logger,
               callbacks::writer& init_writer,
               callbacks::writer& parameter_writer,
@@ -77,10 +78,11 @@ int meanfield(Model& model, const stan::io::var_context& init,
 
   stan::variational::advi<Model, stan::variational::normal_meanfield,
                           boost::ecuyer1988>
-      cmd_advi(model, cont_params, rng, grad_samples, elbo_samples, eval_elbo,
-               output_samples);
-  cmd_advi.run(eta, adapt_engaged, adapt_iterations, tol_rel_obj,
-               max_iterations, logger, parameter_writer, diagnostic_writer);
+    cmd_advi(model, cont_params, rng, grad_samples, elbo_samples,
+	     output_samples);
+  cmd_advi.run(eta, adapt_engaged, adapt_iterations,
+	       max_iterations, eval_window, rhat_cut, mcse_cut,
+	       ess_cut, num_chains, logger, parameter_writer, diagnostic_writer);
 
   return 0;
 }
