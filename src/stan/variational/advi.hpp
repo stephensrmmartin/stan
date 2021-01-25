@@ -806,11 +806,20 @@ class advi {
     bool khat_failed = false;
     for(int k = 0; k < num_chains; k++){
       std::stringstream ss;
-      Eigen::VectorXd iw_vec(n_posterior_samples_);
-      lr(variational_obj_vec[k], iw_vec);
-      //ss << iw_vec;
+      Eigen::VectorXd lw_vec(n_posterior_samples_);
+      lr(variational_obj_vec[k], lw_vec);
       double sigma;
-      stan::analyze::gpdfit(iw_vec, khat, sigma);
+      int n_tail;
+      if(n_posterior_samples_ < 255) {
+        n_tail = int(lw_vec.size() * 0.2);// if more than 255 samples 3 * sqrt(lw_vec.size())
+      }else{
+        n_tail = 3 * sqrt(lw_vec.size());// if more than 255 samples
+      }
+      Eigen::VectorXd w_tail(n_tail);
+      for (int n = 0; n < n_tail; ++n) {
+        w_tail(n) = exp(lw_vec(lw_vec.size() - n_tail + n)) - exp(lw_vec(lw_vec.size() - n_tail));
+      }
+      stan::analyze::gpdfit(w_tail, khat, sigma);
       
       ss << "Chain " << k << "khat: " << khat;
       logger.info(ss);
