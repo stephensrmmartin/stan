@@ -542,26 +542,18 @@ class advi {
     weight_vector.resize(n_posterior_samples_);
     double log_p, log_g;
     std::stringstream msg2;
+    Eigen::VectorXd draws(variational_obj.dimension());
     // Draw posterior sample. log_g is the log normal densities.
     for (int n = 0; n < n_posterior_samples_; ++n) {
-      variational_obj.sample_log_g(rng_, cont_params_, log_g);
+      variational_obj.sample_log_g(rng_, draws, log_g);
       //  log_p: Log probability in the unconstrained space
-      log_p = model_.template log_prob<false, true>(cont_params_, &msg2);
+      log_p = model_.template log_prob<false, true>(draws, &msg2);
       weight_vector(n) = log_p - log_g;
     }
     // sort descending order
-    std::sort(weight_vector.data(), weight_vector.data() + weight_vector.size());
+    std::sort(weight_vector.data(), weight_vector.data() + weight_vector.size(),
+              std::greater<double>());
   }
-
-  /**
-   * RVI Diagnostics
-   * A sample function to show how compute_effective_sample_size() in
-   * stan/analyze/mcmc/compute_effective_sample_size.hpp would be used.
-   * 
-   * @param[in] samples An Eigen::VectorXd containing individual samples
-   * @return Calculated ESS
-   */
-
 
   /**
    * RVI Diagnostics
@@ -732,6 +724,7 @@ class advi {
     const int dim = variational.dimension();
     const int n_approx_params = variational.num_approx_params();
 
+
     std::vector<Q> variational_obj_vec;
     std::vector<Q> elbo_grad_vec;
     std::vector<Q> elbo_grad_square_vec;
@@ -770,7 +763,7 @@ class advi {
       }
 
       if ((n_iter % eval_window == 0 && n_iter > 0) || n_iter == max_runs - 1){
-        logger.info(std::to_string(n_iter));
+        //logger.info(std::to_string(n_iter));
         max_rhat = std::numeric_limits<double>::lowest();
         for(int k = 0; k < n_approx_params; k++) {
           std::vector<const double*> hist_ptrs;
@@ -808,25 +801,34 @@ class advi {
       std::stringstream ss;
       Eigen::VectorXd lw_vec(n_posterior_samples_);
       lr(variational_obj_vec[k], lw_vec);
-      double sigma;
+      double sigma, max_lw;
       int n_tail;
       if(n_posterior_samples_ < 255) {
         n_tail = int(lw_vec.size() * 0.2);// if more than 255 samples 3 * sqrt(lw_vec.size())
       }else{
         n_tail = 3 * sqrt(lw_vec.size());// if more than 255 samples
       }
-      Eigen::VectorXd w_tail(n_tail);
+      /*Eigen::VectorXd w_tail(n_tail);
       for (int n = 0; n < n_tail; ++n) {
         w_tail(n) = exp(lw_vec(lw_vec.size() - n_tail + n)) - exp(lw_vec(lw_vec.size() - n_tail));
-      }
-      stan::analyze::gpdfit(w_tail, khat, sigma);
-      
-      ss << "Chain " << k << "khat: " << khat;
+      }*/
+
+      max_lw = lw_vec.maxCoeff();
+      lw_vec = lw_vec.array() - max_lw;
+      lw_vec = lw_vec.array().exp() - std::exp(lw_vec(n_tail));
+      lw_vec = lw_vec.head(n_tail);
+      stan::analyze::gpdfit(lw_vec, khat, sigma);
+      ss << "Chain " << k << " khat: " << khat;
       logger.info(ss);
-      if(khat > 1.0) { khat_failed = true; };
+      if(khat > 1.0) { 
+        khat_failed = true;
+        break;
+      }
     }
-    if (khat_failed || max_rhat < rhat_cut) {
+    std::stringstream primary_ss;
+    if (khat_failed || max_rhat > rhat_cut) {
       logger.warn("Optimization may have not converged");
+      primary_ss << "max_rhat: " << max_rhat << " rhat_cut: " << rhat_cut << "\n";
       // avarage parameters from the last eval_window param iterations
       for(int i = 0; i < num_chains; i++){
         variational_obj_vec[i].set_approx_params(
@@ -834,7 +836,9 @@ class advi {
       }
     }
     else {
+      primary_ss << "Start secondary iteration at step #: " << T0 << "\n";
       for(int n_post_iter = T0; n_post_iter < max_runs; n_post_iter++){
+        //logger.info(std::to_string(n_post_iter - T0));
         for (int n_chain = 0; n_chain < num_chains; n_chain++){
           calc_ELBO_grad(variational_obj_vec[n_chain], elbo_grad_vec[n_chain], logger);
           elbo_grad_square_vec[n_chain] = 0.9 * elbo_grad_square_vec[n_chain]
@@ -845,7 +849,8 @@ class advi {
 
           hist_vector[n_chain].col(n_post_iter) = variational_obj_vec[n_chain].return_approx_params();
         }
-        if (n_post_iter - T0 % eval_window == 0) {
+        if ((n_post_iter - T0) % eval_window == 0 && (n_post_iter - T0) > 0) {
+          primary_ss << "Secondary iteration # " << n_post_iter << "\n";
           double min_ess = std::numeric_limits<double>::infinity(), max_mcse = std::numeric_limits<double>::lowest();
           for(int k = 0; k < n_approx_params; k++){
             std::vector<const double*> hist_ptrs;
@@ -861,24 +866,28 @@ class advi {
             }
             double ess, mcse;
             ESS_MCSE(ess, mcse, hist_ptrs, chain_length);
-            min_ess = std::max<double>(min_ess, ess);
-            max_mcse = std::min<double>(max_mcse, mcse);
-            if(max_mcse < mcse_cut && min_ess > ess_cut){
-              for(int i = 0; i < num_chains; i++){
-                  variational_obj_vec[i].set_approx_params(
-                  hist_vector[i].block(0, T0, n_approx_params, n_post_iter - T0 + 1).rowwise().mean());
-              }
-              break;
+            primary_ss << "ESS: " << ess << " MCSE: " << mcse << "\n";
+            min_ess = std::min<double>(min_ess, ess);
+            max_mcse = std::max<double>(max_mcse, mcse);
+          }
+          if(max_mcse < mcse_cut && min_ess > ess_cut){
+            primary_ss << "Secondary iteration break condition reached at iteration # "
+                       << n_post_iter << "\n";
+            primary_ss << "min ESS: " << min_ess << " max MCSE: " << max_mcse << "\n";
+            for(int i = 0; i < num_chains; i++){
+                variational_obj_vec[i].set_approx_params(
+                hist_vector[i].block(0, T0, n_approx_params, n_post_iter - T0 + 1).rowwise().mean());
             }
+            break;
           }
         }
       }
     }
     variational.set_to_zero();
     for(int i = 0; i < num_chains; i++){
-      variational += 1.0 /num_chains * variational_obj_vec[i];
+      variational += 1.0 / num_chains * variational_obj_vec[i];
     }
-
+    logger.info(primary_ss);
     logger.info("Finished optimization");
     cont_params_ = variational.mean();
     std::vector<double> cont_vector(cont_params_.size());
@@ -901,7 +910,9 @@ class advi {
       logger.info(ss);
     }
     std::stringstream ss;
-    ss << "Q variational: " << variational.mean();
+    ss << "Q variational: " << variational.mean() << "\n";
+    ss << "Num of Model params: " << dim << "\n";
+    ss << "Num of Approx params: " << n_approx_params << "\n";
     logger.info(ss);
   }
 
