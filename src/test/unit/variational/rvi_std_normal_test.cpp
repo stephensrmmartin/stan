@@ -40,7 +40,9 @@ TEST(rvi_test, std_normal_meanfield) {
     test_advi(my_model, cont_params, base_rng, n_monte_carlo_grad,
 	      n_monte_carlo_elbo, n_posterior_samples);
   
+  int eval_window = 100;
+  double window_size = 0.5;
   test_advi.run(1.0, true, 250, 1000,
-		50, 1.1, 20, 10, 4, logger,
-		stdout_writer, stdout_writer); 
+		eval_window, window_size, 1.1, 0.2, 20, 4, logger,
+		stdout_writer, stdout_writer);
 }
