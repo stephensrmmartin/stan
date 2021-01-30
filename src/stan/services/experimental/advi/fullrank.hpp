@@ -52,7 +52,7 @@ namespace advi {
  * @return error_codes::OK if successful
  */
 template <class Model>
-int meanfield(Model& model, const stan::io::var_context& init,
+int fullrank(Model& model, const stan::io::var_context& init,
               unsigned int random_seed, unsigned int chain, double init_radius,
               int grad_samples, int elbo_samples, int max_iterations,
               double eta, int eval_window, double window_size, double rhat_cut, 
@@ -82,7 +82,7 @@ int meanfield(Model& model, const stan::io::var_context& init,
 
   stan::variational::advi<Model, stan::variational::normal_fullrank,
                           boost::ecuyer1988>
-      cmd_advi(model, cont_params, rng, grad_samples, elbo_samples, eval_elbo,
+      cmd_advi(model, cont_params, rng, grad_samples, elbo_samples,
                output_samples);
   cmd_advi.run(eta, adapt_engaged, adapt_iterations,
 	       max_iterations, eval_window, window_size, rhat_cut, mcse_cut,
