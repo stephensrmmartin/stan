@@ -621,7 +621,7 @@ class advi {
               // multi-chain split rhat (split each chain into 2)
               chain_length.insert(chain_length.end(), 2, static_cast<size_t>(n_iter/2 * window_size));
               hist_ptrs.push_back(hist_vector[i].row(k).data());
-              hist_ptrs.push_back(hist_ptrs[i] + chain_length[0]);
+              hist_ptrs.push_back(hist_vector[i].row(k).data() + chain_length[0]);
             }
           }
           rhat = stan::analyze::compute_potential_scale_reduction(hist_ptrs, chain_length);
