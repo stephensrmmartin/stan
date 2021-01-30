@@ -615,8 +615,13 @@ class advi {
           }
           else{
             for(int i = 0; i < num_chains; i++){
-              chain_length.push_back(static_cast<size_t>(n_iter * window_size));
+              //chain_length.push_back(static_cast<size_t>(n_iter * window_size));
+              //hist_ptrs.push_back(hist_vector[i].row(k).data());
+
+              // multi-chain split rhat (split each chain into 2)
+              chain_length.insert(chain_length.end(), 2, static_cast<size_t>(n_iter/2 * window_size));
               hist_ptrs.push_back(hist_vector[i].row(k).data());
+              hist_ptrs.push_back(hist_ptrs[i] + chain_length[0]);
             }
           }
           rhat = stan::analyze::compute_potential_scale_reduction(hist_ptrs, chain_length);
@@ -632,17 +637,19 @@ class advi {
       }
     }
 
+    ss << "Pre-iteration done. T0: " << T0 << "\n";
+
     bool khat_failed = false;
     for(int k = 0; k < num_chains; k++){
       Eigen::VectorXd lw_vec(n_posterior_samples_);
       lr(variational_obj_vec[k], lw_vec);
       double sigma, max_lw;
       int n_tail;
-      if(n_posterior_samples_ < 255) {
+      if(n_posterior_samples_ < 225) {
         n_tail = int(lw_vec.size() * 0.2);
       }
       else{
-        n_tail = 3 * sqrt(lw_vec.size()); // if more than 255 samples 3 * sqrt(lw_vec.size())
+        n_tail = 3 * sqrt(lw_vec.size()); // if more than 225 samples 3 * sqrt(lw_vec.size())
       }
       max_lw = lw_vec.maxCoeff();
       lw_vec = lw_vec.array() - max_lw;
@@ -680,7 +687,6 @@ class advi {
           hist_vector[n_chain].col(n_post_iter) = variational_obj_vec[n_chain].return_approx_params();
         }
         if ((n_post_iter - T0) % eval_window == 0 && (n_post_iter - T0) > 0) {
-          ss << "Secondary iteration # " << n_post_iter << "\n";
           double min_ess = std::numeric_limits<double>::infinity(), max_mcse = std::numeric_limits<double>::lowest();
           for(int k = 0; k < n_approx_params; k++){
             std::vector<const double*> hist_ptrs;
@@ -699,12 +705,11 @@ class advi {
             }
             double ess, mcse;
             ESS_MCSE(ess, mcse, hist_ptrs, chain_length);
-            ss << "ESS: " << ess << " MCSE: " << mcse << "\n";
             min_ess = std::min<double>(min_ess, ess);
             max_mcse = std::max<double>(max_mcse, mcse);
           }
           if(max_mcse < mcse_cut && min_ess > ess_cut){
-            ss << "Secondary iteration break condition reached at iteration # "
+            ss << "Second iteration break condition reached at iteration # "
                << n_post_iter << "\n";
             ss << "min ESS: " << min_ess << " max MCSE: " << max_mcse << "\n";
             for(int i = 0; i < num_chains; i++){
@@ -733,7 +738,7 @@ class advi {
                        &msg);
     if (msg.str().length() > 0)*/
     for(int i = 0; i < num_chains; i++){
-      ss << "Chain " << i << "mean:" << variational_obj_vec[i].mean() << "\n";
+      ss << "Chain " << i << "mean:\n" << variational_obj_vec[i].mean() << "\n";
     }
     ss << "----\nQ variational:\n" << variational.mean() << "\n----\n";
     ss << "Num of Model params: " << dim << "\n";

@@ -38,13 +38,13 @@ TEST(rvi_test, two_normals_meanfield) {
   int eval_elbo = 10;
   int n_posterior_samples = 100;
   
-  stan::variational::advi<Model, stan::variational::normal_fullrank, rng_t>
+  stan::variational::advi<Model, stan::variational::normal_meanfield, rng_t>
     test_advi(my_model, cont_params, base_rng, n_monte_carlo_grad,
 	      n_monte_carlo_elbo, n_posterior_samples);
 
   int eval_window = 100;
-  double window_size = 50;
-  test_advi.run(1.0, true, 250, 1000,
-		eval_window, 0.5, 1.1, 0.2, 20, 4, logger,
+  double window_size = 0.5;
+  test_advi.run(1.0, true, 250, 10000,
+		eval_window, window_size, 1.1, 0.02, 20, 4, logger,
 		stdout_writer, stdout_writer); 
 }
