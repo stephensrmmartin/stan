@@ -607,11 +607,12 @@ class advi {
         for(int k = 0; k < n_approx_params; k++) {
           std::vector<const double*> hist_ptrs;
           std::vector<size_t> chain_length;
+          const int split_point = n_iter/2;
           if(num_chains == 1){
             // use split rhat
             chain_length.assign(2, static_cast<size_t>(n_iter/2 * window_size));
-            hist_ptrs.push_back(hist_vector[0].row(k).data());
-            hist_ptrs.push_back(hist_ptrs[0] + chain_length[0]);
+            hist_ptrs.push_back(hist_vector[0].row(k).data() + split_point - chain_length[0]);
+            hist_ptrs.push_back(hist_ptrs[0] + n_iter - chain_length[0]);
           }
           else{
             for(int i = 0; i < num_chains; i++){
@@ -620,8 +621,8 @@ class advi {
 
               // multi-chain split rhat (split each chain into 2)
               chain_length.insert(chain_length.end(), 2, static_cast<size_t>(n_iter/2 * window_size));
-              hist_ptrs.push_back(hist_vector[i].row(k).data());
-              hist_ptrs.push_back(hist_vector[i].row(k).data() + chain_length[0]);
+              hist_ptrs.push_back(hist_vector[i].row(k).data() + split_point - chain_length[0]);
+              hist_ptrs.push_back(hist_vector[i].row(k).data() +  n_iter - chain_length[0]);
             }
           }
           rhat = stan::analyze::compute_potential_scale_reduction(hist_ptrs, chain_length);

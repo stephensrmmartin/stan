@@ -42,7 +42,6 @@ inline double compute_potential_scale_reduction(
   // check if chains are constant; all equal to first draw's value
   bool are_all_const = false;
   Eigen::VectorXd init_draw = Eigen::VectorXd::Zero(num_chains);
-
   for (int chain = 0; chain < num_chains; chain++) {
     Eigen::Map<const Eigen::Matrix<double, Eigen::Dynamic, 1>> draw(
         draws[chain], sizes[chain]);
@@ -67,7 +66,6 @@ inline double compute_potential_scale_reduction(
       return std::numeric_limits<double>::quiet_NaN();
     }
   }
-
   using boost::accumulators::accumulator_set;
   using boost::accumulators::stats;
   using boost::accumulators::tag::mean;
