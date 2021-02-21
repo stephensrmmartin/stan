@@ -6,6 +6,7 @@
 #include <vector>
 #include <string>
 #include <boost/random/additive_combine.hpp>  // L'Ecuyer RNG
+#include <stan/analyze/mcmc/compute_potential_scale_reduction.hpp>
 
 typedef boost::ecuyer1988 rng_t;
 typedef two_normals_model_namespace::two_normals_model Model;
@@ -20,7 +21,7 @@ TEST(rvi_test, two_normals_meanfield) {
   Model my_model(dummy_context);
 
   // RNG
-  rng_t base_rng(0);
+  rng_t base_rng(1337);
 
   // Other params
   stan::callbacks::stream_logger logger(std::cout, std::cout, std::cout,
@@ -45,6 +46,6 @@ TEST(rvi_test, two_normals_meanfield) {
   int eval_window = 100;
   double window_size = 0.5;
   test_advi.run(1.0, true, 250, 10000,
-		eval_window, window_size, 1.1, 0.02, 20, 4, logger,
-		stdout_writer, stdout_writer); 
+  eval_window, window_size, 1.1, 0.02, 20, 4, logger,
+	stdout_writer, stdout_writer);
 }
