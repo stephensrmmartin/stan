@@ -74,6 +74,7 @@ int meanfield(Model& model, const stan::io::var_context& init,
   names.push_back("lp__");
   names.push_back("log_p__");
   names.push_back("log_g__");
+  names.push_back("chain_id__");
   model.constrained_param_names(names, true, true);
   parameter_writer(names);
 
