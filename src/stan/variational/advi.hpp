@@ -517,7 +517,7 @@ class advi {
     std::vector<int> disc_vector;
     std::vector<double> values;
 
-    std::stringstream msg;
+    /*std::stringstream msg;
     model_.write_array(rng_, cont_vector, disc_vector, values, true, true,
                        &msg);
     if (msg.str().length() > 0)
@@ -525,7 +525,7 @@ class advi {
 
     // The first row of lp_, log_p, log_g, and chain_id.
     values.insert(values.begin(), {0, 0, 0, -1});
-    parameter_writer(values);
+    parameter_writer(values);*/
 
     // Draw more from posterior and write on subsequent lines
     logger.info("");
