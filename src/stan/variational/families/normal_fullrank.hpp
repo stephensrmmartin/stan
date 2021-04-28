@@ -136,6 +136,56 @@ class normal_fullrank : public base_family {
   const Eigen::MatrixXd& L_chol() const { return L_chol_; }
 
   /**
+   * Return the approximation family's parameters as a single vector
+   */
+  Eigen::VectorXd return_approx_params() const {
+    Eigen::VectorXd cov_components(dimension() * (dimension() + 1) / 2);
+    // number of nonzero components for a lower triangular matrix is n + nC2
+
+    Eigen::VectorXd ret_vec(dimension() + cov_components.rows());
+
+    // Find and append only lower triangular values to return vector
+    int s = 0, e, idx = 0;
+    const double* cov_ptr = L_chol().data();
+    for(int n = 1; n <= dimension(); n++){
+      e = n * dimension() - 1;
+      for(int j = s; j <= e; j++){
+        cov_components(idx++) = *(cov_ptr + j);
+      }
+      s = e + n + 1;
+    }
+    ret_vec << mu(), cov_components;  // mu values followed by choleskey
+    return ret_vec;
+  }
+
+  /**
+   * Set the approximation family's parameters from a single vector
+   * @param[in] param_vec Vector in which parameter values to be set are stored
+   */
+  void set_approx_params(const Eigen::VectorXd& param_vec){
+    set_mu(param_vec.head(dimension()));
+    Eigen::MatrixXd cov_matrix(dimension(), dimension());
+    cov_matrix.setZero(dimension(), dimension());
+    int s = 0, e, idx = 0;
+    for(int n = 1; n <= dimension(); n++){
+      e = n * dimension() - 1;
+      for(int j = s; j <= e; j++){
+        *(cov_matrix.data() + j) = param_vec(idx++);
+      }
+      s = e + n + 1;
+    }
+    set_L_chol(cov_matrix);
+  }
+
+  /**
+   * Return the number of approximation parameters lambda for Q(lambda)
+   */
+  const int num_approx_params() const {
+    return dimension() + dimension() * (dimension() + 1) / 2;
+    // mu_ + L_chol_
+  }
+
+  /**
    * Set the mean vector to the specified value.
    *
    * @param[in] mu Mean vector.
