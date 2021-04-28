@@ -14,11 +14,8 @@
 #include <stan/variational/print_progress.hpp>
 #include <stan/variational/families/normal_fullrank.hpp>
 #include <stan/variational/families/normal_meanfield.hpp>
-<<<<<<< HEAD
 #include <stan/variational/families/normal_lowrank.hpp>
 #include <boost/circular_buffer.hpp>
-=======
->>>>>>> feature/rvi
 #include <boost/lexical_cast.hpp>
 #include <algorithm>
 #include <chrono>

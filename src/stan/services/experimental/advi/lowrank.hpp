@@ -50,13 +50,23 @@ namespace advi {
  */
 template <class Model>
 int lowrank(Model& model, const stan::io::var_context& init,
-            unsigned int random_seed, unsigned int chain, double init_radius,
-            int grad_samples, int elbo_samples, int max_iterations,
-            double tol_rel_obj, int rank, double eta, bool adapt_engaged,
-            int adapt_iterations, int eval_elbo, int output_samples,
-            callbacks::interrupt& interrupt, callbacks::logger& logger,
-            callbacks::writer& init_writer, callbacks::writer& parameter_writer,
-            callbacks::writer& diagnostic_writer) {
+              unsigned int random_seed, unsigned int chain, double init_radius,
+              int grad_samples, int elbo_samples, int max_iterations,
+              double eta, int eval_window, double window_size, double rhat_cut, 
+              double mcse_cut, double ess_cut, int num_chains, 
+              bool adapt_engaged, int adapt_iterations, int output_samples,
+              callbacks::interrupt& interrupt, callbacks::logger& logger,
+              callbacks::writer& init_writer,
+              callbacks::writer& parameter_writer,
+	    callbacks::writer& diagnostic_writer, int rank) {
+// int lowrank(Model& model, const stan::io::var_context& init,
+//             unsigned int random_seed, unsigned int chain, double init_radius,
+//             int grad_samples, int elbo_samples, int max_iterations,
+//             double tol_rel_obj, int rank, double eta, bool adapt_engaged,
+//             int adapt_iterations, int eval_elbo, int output_samples,
+//             callbacks::interrupt& interrupt, callbacks::logger& logger,
+//             callbacks::writer& init_writer, callbacks::writer& parameter_writer,
+//             callbacks::writer& diagnostic_writer) {
   util::experimental_message(logger);
 
   boost::ecuyer1988 rng = util::create_rng(random_seed, chain);
