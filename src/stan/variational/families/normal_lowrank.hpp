@@ -141,6 +141,14 @@ class normal_lowrank : public base_family {
     validate_noise(function, log_d);
   }
 
+  void set_approx_params(const Eigen::VectorXd& param_vec) {
+    
+  }
+
+  Eigen::VectorXd return_approx_params() const {
+    
+  }
+
   /**
    * Return the dimensionality of the approximation.
    */
