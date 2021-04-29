@@ -357,9 +357,9 @@ class advi_base {
 
     for(int i = 0; i < num_chains; i++){
       hist_vector.push_back(histMat(n_approx_params, max_iterations));
-      variational_obj_vec.push_back(Q(cont_params_));
-      elbo_grad_vec.push_back(Q(dim));
-      elbo_grad_square_vec.push_back(Q(dim));
+      variational_obj_vec.push_back(init_variational(cont_params_));
+      elbo_grad_vec.push_back(init_variational(dim));
+      elbo_grad_square_vec.push_back(init_variational(dim));
     }
 
     for (int n_iter = 0; n_iter < max_iterations; n_iter++){
