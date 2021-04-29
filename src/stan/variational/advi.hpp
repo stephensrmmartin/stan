@@ -323,7 +323,7 @@ class advi_base {
     diagnostic_writer("iter,time_in_seconds,ELBO");
 
     // Initialize variational approximation
-    Q variational = Q(cont_params_);
+    Q variational = init_variational(cont_params_);
     std::stringstream ss;
 
     if (adapt_engaged) {
