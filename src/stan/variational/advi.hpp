@@ -742,10 +742,10 @@ template <class Model, class Q, class BaseRNG>
 class advi : public advi_base<Model, Q, BaseRNG> {
  public:
   advi(Model& m, Eigen::VectorXd& cont_params, BaseRNG& rng,
-       int n_monte_carlo_grad, int n_monte_carlo_elbo, int eval_elbo,
+       int n_monte_carlo_grad, int n_monte_carlo_elbo,
        int n_posterior_samples)
       : advi_base<Model, Q, BaseRNG>(m, cont_params, rng, n_monte_carlo_grad,
-                                     n_monte_carlo_elbo, eval_elbo,
+                                     n_monte_carlo_elbo,
                                      n_posterior_samples) {}
 
  private:
@@ -784,10 +784,10 @@ class advi_lowrank
    */
   advi_lowrank(Model& m, Eigen::VectorXd& cont_params, BaseRNG& rng,
                size_t rank, int n_monte_carlo_grad, int n_monte_carlo_elbo,
-               int eval_elbo, int n_posterior_samples)
+               int n_posterior_samples)
       : advi_base<Model, stan::variational::normal_lowrank, BaseRNG>(
             m, cont_params, rng, n_monte_carlo_grad, n_monte_carlo_elbo,
-            eval_elbo, n_posterior_samples),
+            n_posterior_samples),
         rank_(rank) {
     static const char* function = "stan::variational::advi_lowrank";
     math::check_positive(function, "Approximation rank", rank_);
