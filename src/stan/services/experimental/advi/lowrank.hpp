@@ -88,8 +88,11 @@ int lowrank(Model& model, const stan::io::var_context& init,
   stan::variational::advi_lowrank<Model, boost::ecuyer1988> cmd_advi(
       model, cont_params, rng, rank, grad_samples, elbo_samples, eval_elbo,
       output_samples);
-  cmd_advi.run(eta, adapt_engaged, adapt_iterations, tol_rel_obj,
-               max_iterations, logger, parameter_writer, diagnostic_writer);
+  cmd_advi.run(eta, adapt_engaged, adapt_iterations,
+	       max_iterations, eval_window, window_size, rhat_cut, mcse_cut,
+	       ess_cut, num_chains, logger, parameter_writer, diagnostic_writer);
+  // cmd_advi.run(eta, adapt_engaged, adapt_iterations, tol_rel_obj,
+  //              max_iterations, logger, parameter_writer, diagnostic_writer);
 
   return 0;
 }
