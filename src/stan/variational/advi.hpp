@@ -59,7 +59,7 @@ class advi_base {
    * @throw std::runtime_error if n_monte_carlo_elbo is not positive
    * @throw std::runtime_error if n_posterior_samples is not positive
    */
-  advi(Model& m, Eigen::VectorXd& cont_params, BaseRNG& rng,
+  advi_base(Model& m, Eigen::VectorXd& cont_params, BaseRNG& rng,
        int n_monte_carlo_grad, int n_monte_carlo_elbo,
        int n_posterior_samples)
       : model_(m),
