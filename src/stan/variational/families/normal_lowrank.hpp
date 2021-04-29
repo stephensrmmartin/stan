@@ -168,7 +168,7 @@ class normal_lowrank : public base_family {
     Eigen::VectorXd cov_components(dimension() * rank() - rank() * (rank() - 1) / 2);
     Eigen::VectorXd ret_vec(dimension() + cov_components.rows() + dimension());
     
-    ind indx = 0;
+    int indx = 0;
     for(int col = 0; col < rank(); col++) {
       for(int row = col; row < dimension(); row++) {
 	cov_components(indx) = B()(row, col);
