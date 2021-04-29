@@ -58,7 +58,7 @@ int lowrank(Model& model, const stan::io::var_context& init,
               callbacks::interrupt& interrupt, callbacks::logger& logger,
               callbacks::writer& init_writer,
               callbacks::writer& parameter_writer,
-	    callbacks::writer& diagnostic_writer, int rank) {
+	    callbacks::writer& diagnostic_writer, size_t rank) {
 // int lowrank(Model& model, const stan::io::var_context& init,
 //             unsigned int random_seed, unsigned int chain, double init_radius,
 //             int grad_samples, int elbo_samples, int max_iterations,
