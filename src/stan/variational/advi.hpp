@@ -552,7 +552,7 @@ class advi {
         if (msg2.str().length() > 0)
           logger.info(msg2);
         // Write lp__, log_p, log_g, and chain_id.
-        values.insert(values.begin(), {0.0, log_p, log_g, k});
+        values.insert(values.begin(), {0.0, log_p, log_g, static_cast<double>(k)});
         parameter_writer(values);
         }
     }
