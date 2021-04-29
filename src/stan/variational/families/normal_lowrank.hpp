@@ -141,12 +141,42 @@ class normal_lowrank : public base_family {
     validate_noise(function, log_d);
   }
 
-  void set_approx_params(const Eigen::VectorXd& param_vec) {
-    
+  const int num_approx_params() const {
+    // Means + low-rank params + log_d?
+    // Means + dim*rank - strict_upper_tri + log_d
+    return dimension() + dimension() * rank() - rank() * (rank() - 1) / 2 + dimension();
   }
 
+  /* IMPLEMENT ME */
+  void set_approx_params(const Eigen::VectorXd& param_vec) {
+    set_mu(param_vec.head(dimension()));
+    Eigen::MatrixXd B(dimension(),rank());
+    B.setZero(dimension(), rank());
+    int vec_ind = dimension();
+    for(int col = 0; col < rank(); col++) {
+      for(int row = col; row < dimension(); row++) {
+	B(row, col) = param_vec(vec_ind);
+	vec_ind++;
+      }
+    }
+    set_B(B);
+    set_log_d(param_vec.tail(dimension()));
+  }
+
+  /* IMPLEMENT ME */
   Eigen::VectorXd return_approx_params() const {
+    Eigen::VectorXd cov_components(dimension() * rank() - rank() * (rank() - 1) / 2);
+    Eigen::VectorXd ret_vec(dimension() + cov_components.rows() + dimension());
     
+    ind indx = 0;
+    for(int col = 0; col < rank(); col++) {
+      for(int row = col; row < dimension(); row++) {
+	cov_components(indx) = B()(row, col);
+	indx++;
+      }
+    }
+    ret_vec << mu(), cov_components, log_d();
+    return ret_vec;
   }
 
   /**
