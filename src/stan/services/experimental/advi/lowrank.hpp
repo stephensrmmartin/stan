@@ -86,8 +86,7 @@ int lowrank(Model& model, const stan::io::var_context& init,
       = Eigen::Map<Eigen::VectorXd>(&cont_vector[0], cont_vector.size(), 1);
 
   stan::variational::advi_lowrank<Model, boost::ecuyer1988> cmd_advi(
-      model, cont_params, rng, rank, grad_samples, elbo_samples, eval_elbo,
-      output_samples);
+      model, cont_params, rng, rank, grad_samples, elbo_samples, eval_elbo, output_samples);
   cmd_advi.run(eta, adapt_engaged, adapt_iterations,
 	       max_iterations, eval_window, window_size, rhat_cut, mcse_cut,
 	       ess_cut, num_chains, logger, parameter_writer, diagnostic_writer);
